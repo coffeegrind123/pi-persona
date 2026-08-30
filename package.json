@@ -1,8 +1,8 @@
 {
   "name": "pi-persona",
-  "version": "1.0.0-forge.1",
+  "version": "1.0.0",
   "type": "module",
-  "description": "A character persona over invariant engineering, for pi. Port of openclaude's /identity system — see FORK.md.",
+  "description": "A character persona for pi's voice, over engineering that does not change. chara_card_v2 cards from chub.ai or disk, extracted into a voice profile and prepended to the system prompt.",
   "keywords": [
     "pi-package",
     "pi",
@@ -11,10 +11,24 @@
     "pi-extension",
     "persona",
     "identity",
+    "character",
     "chara-card-v2",
-    "roleplay"
+    "roleplay",
+    "chub"
   ],
-  "license": "SEE FORK.md",
+  "license": "MIT",
+  "author": "coffeegrind123",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coffeegrind123/pi-persona.git"
+  },
+  "homepage": "https://github.com/coffeegrind123/pi-persona#readme",
+  "bugs": {
+    "url": "https://github.com/coffeegrind123/pi-persona/issues"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "scripts": {
     "lint": "for file in extensions/index.ts src/*.ts tests/*.ts; do node --check \"$file\" 2>/dev/null || node --experimental-strip-types --no-warnings -e \"import('./$file').catch(e => { if (e.code === 'ERR_MODULE_NOT_FOUND') process.exit(0); console.error('$file:', e.message); process.exit(1) })\"; done",
     "test": "node --experimental-strip-types --no-warnings --test tests/*.test.ts"
@@ -23,15 +37,15 @@
     "extensions",
     "src",
     "README.md",
-    "FORK.md"
+    "FORK.md",
+    "LICENSE"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.84.0"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "pi": {
     "extensions": [
       "./extensions/index.ts"
     ]
-  },
-  "private": true
+  }
 }

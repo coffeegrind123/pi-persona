@@ -5,13 +5,21 @@ Ported from [`coffeegrind123/openclaude`](https://github.com/coffeegrind123/open
 `src/commands/{identity,randompersona}/*`, and `getIdentitySection()` in
 `src/constants/prompts.ts`), read at HEAD on 2026-08-30. openclaude is a Claude
 Code fork; it carries no LICENSE file and its `package.json` declares no license
-field, which is stated here rather than guessed at.
+field, which is stated here rather than guessed at. This port is MIT (see
+LICENSE); that covers the code in this repository, and says nothing it is not
+entitled to say about upstream's.
 
-`scripts/pi-local.sh` loads it as:
+It began as a package inside
+[instantcoffee](https://github.com/coffeegrind123/instantcoffee), which still
+consumes it — now as a submodule at `vendor/pi-persona`, loaded by absolute path:
 
 ```
 -e vendor/pi-persona/extensions/index.ts
 ```
+
+For anyone else, `pi install git:github.com/coffeegrind123/pi-persona` — see
+README.md for the other forms and PUBLISHING.md for how the package is put
+together.
 
 Nothing needs installing. The extension's only bare import is pi's own package
 (`getAgentDir`, plus two `import type`s that are erased before it runs), which pi

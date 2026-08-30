@@ -2,6 +2,37 @@
 
 A character persona for pi's voice, over engineering that does not change.
 
+[![CI](https://github.com/coffeegrind123/pi-persona/actions/workflows/ci.yml/badge.svg)](https://github.com/coffeegrind123/pi-persona/actions/workflows/ci.yml)
+
+## Install
+
+```bash
+pi install git:github.com/coffeegrind123/pi-persona
+```
+
+Pin a tag on anything you care about — the persona block is ~3,700 tokens of
+every request, and it should not change because somebody pushed to `main`:
+
+```bash
+pi install git:github.com/coffeegrind123/pi-persona@v1.0.0
+```
+
+Try it for one run without installing anything:
+
+```bash
+pi -e git:github.com/coffeegrind123/pi-persona
+```
+
+Project-local rather than global — `-l` writes `.pi/settings.json`, which you can
+commit and share:
+
+```bash
+pi install -l git:github.com/coffeegrind123/pi-persona
+```
+
+Nothing to install alongside it. The only bare import is pi's own package, which
+pi resolves from its own module root. Node 22.6+.
+
 ```
 /persona                      pick a source: local library, chub.ai, search, random
 /persona local                browse the library; activate a cached one for free
@@ -62,7 +93,6 @@ persisted file:
 
 | variable | values | what it does |
 | --- | --- | --- |
-| `PERSONA_ENABLED` | `0` / `1` | whether `scripts/pi-local.sh` loads it at all |
 | `PERSONA_PROMPT_MODE` | `full` / `lean` | how much of the contract to send |
 | `PERSONA_IMMERSION` | `auto` / `immersion` / `analysis` / `off` | first-message marker |
 | `CHUB_API_KEY` | a key | overrides the public gateway key |
@@ -70,7 +100,7 @@ persisted file:
 ## Tests
 
 ```bash
-cd vendor/pi-persona && npm run lint && npm test
+npm run lint && npm test
 ```
 
 103 tests. The extension suite drives the real factory against the installed pi;

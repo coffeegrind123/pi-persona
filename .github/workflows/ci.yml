@@ -1,0 +1,57 @@
+name: CI
+
+# Two things are checked, and neither needs a toolchain.
+#
+#   1. The extension PARSES. pi loads it with jiti at session start, and a parse
+#      error there does not fail loudly — the session simply comes up without
+#      /persona. Node's type stripping is a parser, not a type checker, which is
+#      the right depth: it catches syntax and any construct a strip-only
+#      transpiler cannot handle, while needing no node_modules.
+#   2. The suite runs, WITH pi installed, so tests/extension.test.ts drives the
+#      real factory against the same import a session would rather than skipping
+#      itself. Those tests skip silently without pi on PATH, which is exactly the
+#      shape of a green run that checked nothing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Extension parses
+        run: |
+          node --experimental-strip-types --no-warnings \
+               -e "import('./extensions/index.ts').catch(e => {
+                     if (e.code === 'ERR_MODULE_NOT_FOUND') process.exit(0);
+                     console.error(e.message); process.exit(1);
+                   })"
+          echo "  extensions/index.ts: OK"
+
+      - name: Lint
+        run: npm run lint
+
+      # Installed before the suite so the extension tests do not skip. Without
+      # pi they pass by not running, and the coupling — a renamed export, an
+      # event that never fires, a handler returning the wrong shape — is exactly
+      # what no unit test can see.
+      - name: Install pi
+        run: npm install -g @earendil-works/pi-coding-agent
+
+      - name: Test
+        run: npm test
+
+      - name: The extension tests actually ran
+        run: |
+          npm test 2>&1 | tee /tmp/out.txt
+          grep -q "the extension against a real pi import" /tmp/out.txt \
+            || { echo "the pi-coupling suite did not run"; exit 1; }
+          grep -q "# fail 0" /tmp/out.txt
