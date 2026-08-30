@@ -1,6 +1,6 @@
 {
   "name": "pi-persona",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "description": "A character persona for pi's voice, over engineering that does not change. chara_card_v2 cards from chub.ai or disk, extracted into a voice profile and prepended to the system prompt.",
   "keywords": [
