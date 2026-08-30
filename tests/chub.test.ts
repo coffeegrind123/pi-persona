@@ -82,7 +82,7 @@ test("the card URL pins ref=main and the blob response type", () => {
 // http.sys and friends reject a bodyless POST before the handler sees it, and
 // upstream sends `{}`. Dropping it would be a change nobody notices until the
 // gateway starts answering 411.
-test("search POSTs a body and the gateway key headers", async () => {
+test("search POSTs a body, because a bodyless POST is a different request", async () => {
   let seen: RequestInit | undefined
   await searchCharacters({
     sort: "trending",
@@ -93,10 +93,76 @@ test("search POSTs a body and the gateway key headers", async () => {
   })
   assert.equal(seen?.method, "POST")
   assert.equal(seen?.body, "{}")
-  const headers = seen?.headers as Record<string, string>
-  assert.ok(headers["ch-api-key"])
-  assert.equal(headers.samwise, headers["ch-api-key"])
   assert.ok(seen?.signal)
+})
+
+// The hardcoded key openclaude ships was carried into the first version of this
+// file. It is somebody else's credential, and measured against the live gateway
+// it buys nothing — both routes answer 200 with identical bodies for the key,
+// for a bogus UUID, and for no auth headers at all. Nothing is sent unless the
+// operator sets one.
+test("no auth header is sent when CHUB_API_KEY is unset", async () => {
+  const prior = process.env.CHUB_API_KEY
+  delete process.env.CHUB_API_KEY
+  try {
+    let seen: RequestInit | undefined
+    await searchCharacters({
+      sort: "trending",
+      fetchImpl: (async (_url: string, init: RequestInit) => {
+        seen = init
+        return jsonResponse({ data: { nodes: [], count: 0, page: 1, cursor: null, previous_cursor: null } })
+      }) as unknown as typeof fetch,
+    })
+    const headers = seen?.headers as Record<string, string>
+    assert.equal(headers["ch-api-key"], undefined)
+    assert.equal(headers.samwise, undefined)
+    assert.equal(headers["Content-Type"], "application/json")
+  } finally {
+    if (prior === undefined) delete process.env.CHUB_API_KEY
+    else process.env.CHUB_API_KEY = prior
+  }
+})
+
+test("an operator's own key is sent on both routes when they set one", async () => {
+  const prior = process.env.CHUB_API_KEY
+  process.env.CHUB_API_KEY = "operator-key"
+  try {
+    let searchHeaders: Record<string, string> | undefined
+    await searchCharacters({
+      sort: "trending",
+      fetchImpl: (async (_u: string, i: RequestInit) => {
+        searchHeaders = i.headers as Record<string, string>
+        return jsonResponse({ data: { nodes: [], count: 0, page: 1, cursor: null, previous_cursor: null } })
+      }) as unknown as typeof fetch,
+    })
+    assert.equal(searchHeaders?.["ch-api-key"], "operator-key")
+    assert.equal(searchHeaders?.samwise, "operator-key")
+
+    let cardHeaders: Record<string, string> | undefined
+    await downloadCard(1, undefined, (async (_u: string, i: RequestInit) => {
+      cardHeaders = i.headers as Record<string, string>
+      return jsonResponse(CARD)
+    }) as unknown as typeof fetch)
+    assert.equal(cardHeaders?.["ch-api-key"], "operator-key")
+    assert.equal(cardHeaders?.["private-token"], "operator-key")
+  } finally {
+    if (prior === undefined) delete process.env.CHUB_API_KEY
+    else process.env.CHUB_API_KEY = prior
+  }
+})
+
+// The literal itself, so it cannot come back by a careless revert or a merge.
+test("no hardcoded gateway key survives in the source", async () => {
+  const { readFileSync } = await import("node:fs")
+  const { dirname, join } = await import("node:path")
+  const { fileURLToPath } = await import("node:url")
+  const src = readFileSync(
+    join(dirname(dirname(fileURLToPath(import.meta.url))), "src", "chub.ts"),
+    "utf8",
+  )
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.test(src),
+    "a UUID-shaped literal is back in src/chub.ts")
+  assert.ok(!src.includes("DEFAULT_KEY"))
 })
 
 test("a non-ok search is an error naming the status, not an empty result", async () => {

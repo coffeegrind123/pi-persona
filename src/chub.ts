@@ -9,8 +9,6 @@
 
 import type { CharaCardV2, ChubSearchResponse, SortMode } from "./types.ts"
 
-/** Upstream's public gateway key. Overridable with CHUB_API_KEY. */
-const DEFAULT_KEY = "REDACTED-CHUB-KEY"
 
 export const PAGE_SIZE = 8
 export const DEFAULT_TIMEOUT_MS = 15_000
@@ -37,13 +35,31 @@ export function isSortMode(value: string): value is SortMode {
   return (SORT_MODES as string[]).includes(value)
 }
 
-function key(): string {
-  return process.env.CHUB_API_KEY || DEFAULT_KEY
+/**
+ * The caller's chub.ai key, if they have one.
+ *
+ * openclaude ships a hardcoded key and falls back to it. That was carried into
+ * the first version of this file and should not have been: it is somebody
+ * else's credential committed into a public repository, and it buys nothing.
+ *
+ * Measured against the live gateway on 2026-08-30, both endpoints, three ways —
+ * with the hardcoded key, with a bogus UUID, and with no auth headers at all:
+ *
+ *   search        200, 3 nodes, identical body in all three
+ *   card download 200, 149,107 bytes, identical in all three
+ *
+ * The gateway does not validate the header for either route, so the fallback
+ * was decorative. No key is sent unless the operator sets CHUB_API_KEY, and
+ * everything here works without one.
+ */
+function key(): string | null {
+  const k = process.env.CHUB_API_KEY?.trim()
+  return k ? k : null
 }
 
 function headers(extra: Record<string, string> = {}): Record<string, string> {
   const k = key()
-  return { "ch-api-key": k, samwise: k, ...extra }
+  return k ? { "ch-api-key": k, samwise: k, ...extra } : { ...extra }
 }
 
 export function sortParams(sort: SortMode): string {
@@ -120,7 +136,7 @@ export async function downloadCard(
   const doFetch = fetchImpl ?? fetch
   const res = await doFetch(buildCardUrl(projectId), {
     method: "GET",
-    headers: headers({ "private-token": key() }),
+    headers: headers(key() ? { "private-token": key() as string } : {}),
     signal: signal ?? AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
   })
   if (!res.ok) {
