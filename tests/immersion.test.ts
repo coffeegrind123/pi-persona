@@ -8,15 +8,9 @@ import {
   IMMERSION_MODES,
   isFirstUserTurn,
   isImmersionMode,
-  looksLikeDeepSeek,
   maybeAppendMarker,
+  normalizeMode,
 } from "../src/immersion.ts"
-
-const FORGE = { id: "qwen3.8-27b", provider: "forge", baseUrl: "http://localhost:8081/v1" }
-const DEEPSEEK_PROVIDER = { id: "deepseek-chat", provider: "deepseek", baseUrl: "https://api.deepseek.com" }
-// The case that matters on this stack: a DeepSeek model served THROUGH forge.
-// A provider-only check reads this as forge and never fires.
-const DEEPSEEK_VIA_FORGE = { id: "DeepSeek-V4-GGUF", provider: "forge", baseUrl: "http://localhost:8081/v1" }
 
 // These strings are the mechanism. A paraphrase, a translation or a "cleanup"
 // is a different string, and a different string routes nowhere.
@@ -28,34 +22,38 @@ test("the markers are byte-exact", () => {
   assert.notEqual(IMMERSION_MARKER, ANALYSIS_MARKER)
 })
 
-test("auto injects nothing on this stack's model", () => {
-  assert.equal(chooseMarker("auto", true, FORGE), null)
+// The gate this port shipped with, removed 2026-08-30. Nothing consults the
+// model any more: the markers are also an ordinary instruction, and the
+// deliberating-from-outside-the-character failure they fix was watched on Qwen.
+test("no mode consults the model", () => {
+  assert.equal(chooseMarker.length, 2, "chooseMarker still takes a model argument")
+  assert.equal(maybeAppendMarker.length, 4, "maybeAppendMarker still takes a model argument")
 })
 
-test("auto injects on a DeepSeek model, however it is served", () => {
-  assert.equal(chooseMarker("auto", true, DEEPSEEK_PROVIDER), IMMERSION_MARKER)
-  assert.equal(chooseMarker("auto", true, DEEPSEEK_VIA_FORGE), IMMERSION_MARKER)
+test("immersion is what a persona gets by default", () => {
+  assert.equal(chooseMarker("immersion", true), IMMERSION_MARKER)
+  assert.equal(chooseMarker("analysis", true), ANALYSIS_MARKER)
 })
 
-test("looksLikeDeepSeek reads id and baseUrl, not just the provider", () => {
-  assert.ok(looksLikeDeepSeek(DEEPSEEK_VIA_FORGE))
-  assert.ok(looksLikeDeepSeek({ provider: "forge", baseUrl: "https://api.deepseek.com/v1" }))
-  assert.ok(!looksLikeDeepSeek(FORGE))
-  assert.ok(!looksLikeDeepSeek(undefined))
-  assert.ok(!looksLikeDeepSeek(null))
-  assert.ok(!looksLikeDeepSeek({}))
+// Kept working rather than kept meaningful: an existing PERSONA_IMMERSION=auto,
+// or a persona-settings.json written before the change, must not silently fall
+// back to a mode nobody chose.
+test("auto is accepted and means immersion", () => {
+  assert.ok(isImmersionMode("auto"))
+  assert.equal(normalizeMode("auto"), "immersion")
+  assert.equal(chooseMarker("auto", true), IMMERSION_MARKER)
 })
 
-test("explicit modes fire on any model", () => {
-  assert.equal(chooseMarker("immersion", true, FORGE), IMMERSION_MARKER)
-  assert.equal(chooseMarker("analysis", true, FORGE), ANALYSIS_MARKER)
+test("auto is not offered as a choice, only accepted", () => {
+  assert.deepEqual(IMMERSION_MODES, ["immersion", "analysis", "off"])
+  assert.ok(!IMMERSION_MODES.includes("auto" as never))
 })
 
 test("off and no-persona both suppress every mode", () => {
-  for (const mode of IMMERSION_MODES) {
-    assert.equal(chooseMarker(mode, false, DEEPSEEK_PROVIDER), null, `${mode} fired with no persona`)
+  for (const mode of [...IMMERSION_MODES, "auto" as const]) {
+    assert.equal(chooseMarker(mode, false), null, `${mode} fired with no persona`)
   }
-  assert.equal(chooseMarker("off", true, DEEPSEEK_PROVIDER), null)
+  assert.equal(chooseMarker("off", true), null)
 })
 
 test("isFirstUserTurn ignores assistant turns and tool traffic", () => {
@@ -74,13 +72,13 @@ test("a synthetic user message does not consume the first turn", () => {
 })
 
 test("the marker lands at the END of the first user message", () => {
-  const out = maybeAppendMarker("do the thing", [], "immersion", true, FORGE)
+  const out = maybeAppendMarker("do the thing", [], "immersion", true)
   assert.ok(out.startsWith("do the thing"))
   assert.ok(out.endsWith(IMMERSION_MARKER))
 })
 
 test("nothing is appended past the first turn", () => {
-  const out = maybeAppendMarker("second", [{ role: "user" }], "immersion", true, FORGE)
+  const out = maybeAppendMarker("second", [{ role: "user" }], "immersion", true)
   assert.equal(out, "second")
 })
 
@@ -89,18 +87,21 @@ test("nothing is appended past the first turn", () => {
 // becomes part of that command's argument string.
 test("slash commands are left alone", () => {
   for (const cmd of ["/loop status", "  /skill:foo", "/persona"]) {
-    assert.equal(maybeAppendMarker(cmd, [], "immersion", true, FORGE), cmd)
+    assert.equal(maybeAppendMarker(cmd, [], "immersion", true), cmd)
   }
 })
 
 test("a non-string prompt passes through untouched", () => {
   const weird = { not: "a string" } as unknown as string
-  assert.equal(maybeAppendMarker(weird, [], "immersion", true, FORGE), weird)
+  assert.equal(maybeAppendMarker(weird, [], "immersion", true), weird)
 })
 
 test("isImmersionMode rejects anything that is not a mode", () => {
-  assert.ok(isImmersionMode("auto"))
+  assert.ok(isImmersionMode("immersion"))
+  assert.ok(isImmersionMode("analysis"))
   assert.ok(isImmersionMode("off"))
+  assert.ok(isImmersionMode("auto"), "the deprecated alias must keep loading")
   assert.ok(!isImmersionMode("on"))
+  assert.ok(!isImmersionMode("deepseek"))
   assert.ok(!isImmersionMode(""))
 })

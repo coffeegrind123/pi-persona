@@ -17,9 +17,11 @@ export interface PersonaSettings {
 }
 
 export const DEFAULT_SETTINGS: PersonaSettings = {
-  // `auto` resolves to "no marker" on anything that is not DeepSeek — see
-  // immersion.ts. Nothing is injected on this stack unless it is asked for.
-  immersionMode: "auto",
+  // ON. The marker is ~120 tokens appended once, to the first user message, and
+  // what it fixes — the model deliberating about the character from outside it
+  // instead of thinking as them — was watched happening on this stack. It no
+  // longer gates on the model; see immersion.ts's header.
+  immersionMode: "immersion",
   // The faithful port. `lean` is ~1,270 tokens cheaper per turn; FORK.md has
   // both measurements and what lean gives up.
   promptMode: "full",

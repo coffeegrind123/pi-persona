@@ -33,6 +33,7 @@ import {
   IMMERSION_MODES,
   isImmersionMode,
   maybeAppendMarker,
+  normalizeMode,
   type PriorMessage,
 } from "../src/immersion.ts"
 import {
@@ -143,13 +144,7 @@ export default function personaExtension(pi: ExtensionAPI) {
       if (!hasPersona) return { action: "continue" as const }
 
       const prior = priorUserMessages(ctx)
-      const next = maybeAppendMarker(
-        event.text,
-        prior,
-        settings.immersionMode,
-        hasPersona,
-        ctx.model,
-      )
+      const next = maybeAppendMarker(event.text, prior, settings.immersionMode, hasPersona)
       if (next === event.text) return { action: "continue" as const }
       return { action: "transform" as const, text: next }
     } catch (err) {
@@ -472,10 +467,10 @@ export default function personaExtension(pi: ExtensionAPI) {
     } else {
       lines.push(`Block: none (0 tokens). Prompt mode is '${settings.promptMode}' when one is active.`)
     }
-    const model = ctx.model
-    const marker = settings.immersionMode
+    const marker = normalizeMode(settings.immersionMode)
     lines.push(
-      `Immersion: ${marker}${marker === "auto" ? ` (resolves to off unless the model is DeepSeek; this one is ${model?.provider ?? "unknown"}/${model?.id ?? "unknown"})` : ""}`,
+      `Immersion: ${marker}${settings.immersionMode === "auto" ? " (via the deprecated `auto` alias)" : ""}` +
+        (marker === "off" ? "" : " — appended to the first user message of a session"),
     )
     lines.push(`Library: ${listLocalPersonas(root).length} extracted, ${listLooseCardJsonFiles(root).length} loose card.json`)
     return lines

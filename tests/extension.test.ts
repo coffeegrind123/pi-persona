@@ -160,8 +160,8 @@ describe("the extension against a real pi import", { skip: SKIP }, () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  // auto is off on anything that is not DeepSeek, which is this whole stack.
-  test("no immersion marker is injected on a forge model", async () => {
+  // On by default since 2026-08-30, and not gated on the model any more.
+  test("the marker is injected by default when a persona is active", async () => {
     const dir = withAgentDir()
     writeFileSync(join(dir, PERSONA_FILE), FRAMING("Nadia"), "utf8")
     const api = new FakeApi()
@@ -171,8 +171,42 @@ describe("the extension against a real pi import", { skip: SKIP }, () => {
       { text: "do the thing", source: "interactive" },
       new FakeCtx({ model: FORGE }),
     )
+    assert.equal((r as { action: string }).action, "transform")
+    assert.ok((r as { text: string }).text.endsWith(IMMERSION_MARKER))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // The one gate that stayed: no character, no marker.
+  test("no marker is injected with no persona active", async () => {
+    const dir = withAgentDir()
+    const api = new FakeApi()
+    await (await loadFactory())(api)
+    const [r] = await api.fire(
+      "input",
+      { text: "do the thing", source: "interactive" },
+      new FakeCtx({ model: FORGE }),
+    )
     assert.deepEqual(r, { action: "continue" })
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("PERSONA_IMMERSION=off still turns it off", async () => {
+    const dir = withAgentDir()
+    writeFileSync(join(dir, PERSONA_FILE), FRAMING("Nadia"), "utf8")
+    process.env.PERSONA_IMMERSION = "off"
+    try {
+      const api = new FakeApi()
+      await (await loadFactory())(api)
+      const [r] = await api.fire(
+        "input",
+        { text: "do the thing", source: "interactive" },
+        new FakeCtx({ model: FORGE }),
+      )
+      assert.deepEqual(r, { action: "continue" })
+    } finally {
+      delete process.env.PERSONA_IMMERSION
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test("an explicitly requested marker lands on the first user turn only", async () => {
@@ -293,7 +327,9 @@ describe("the extension against a real pi import", { skip: SKIP }, () => {
     assert.ok(subs.some(s => s.value === "local"))
     assert.ok(subs.some(s => s.value === "chub"))
     const modes = (await complete("immersion ")) as Array<{ value: string }>
-    assert.ok(modes.some(m => m.value === "immersion auto"))
+    assert.ok(modes.some(m => m.value === "immersion immersion"))
+    assert.ok(modes.some(m => m.value === "immersion off"))
+    assert.ok(!modes.some(m => m.value === "immersion auto"), "auto is accepted, not offered")
     const sorts = (await complete("chub tre")) as Array<{ value: string }>
     assert.deepEqual(sorts.map(s => s.value), ["chub trending"])
   })
@@ -404,7 +440,7 @@ describe("the extension against a real pi import", { skip: SKIP }, () => {
     const text = ctx.notifications.at(-1)!.text
     assert.ok(text.includes("Active persona: Nadia"))
     assert.match(text, /Block: full, ~\d+ tokens of every request/)
-    assert.ok(text.includes("Immersion: auto"))
+    assert.ok(text.includes("Immersion: immersion"))
     rmSync(dir, { recursive: true, force: true })
   })
 })

@@ -43,7 +43,7 @@ pi resolves from its own module root. Node 22.6+.
 /persona status               what is active, and what it costs per request
 /persona clear                back to the neutral voice
 /persona prompt full|lean     how much of the persona contract to send
-/persona immersion <mode>     auto | immersion | analysis | off
+/persona immersion <mode>     immersion (default) | analysis | off
 ```
 
 The persona governs **how** things are said. It has no authority over
@@ -94,7 +94,7 @@ persisted file:
 | variable | values | what it does |
 | --- | --- | --- |
 | `PERSONA_PROMPT_MODE` | `full` / `lean` | how much of the contract to send |
-| `PERSONA_IMMERSION` | `auto` / `immersion` / `analysis` / `off` | first-message marker |
+| `PERSONA_IMMERSION` | `immersion` / `analysis` / `off` | first-message thinking-mode marker; on by default |
 | `CHUB_API_KEY` | a key | overrides the public gateway key |
 
 ## Tests

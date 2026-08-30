@@ -10,12 +10,13 @@ function root(): string {
   return mkdtempSync(join(tmpdir(), "persona-settings-"))
 }
 
-// Defaults are the whole safety story for this package: a fresh install must
-// inject no marker and must not silently pick the cheaper block.
-test("the defaults are auto immersion and the full block", () => {
+// A fresh install gets the marker and the full block. Both are pinned rather
+// than merely asserted: they are what a persona session actually behaves like,
+// and a silent revert of either would present as "the persona got weaker".
+test("the defaults are immersion and the full block", () => {
   const r = root()
   assert.deepEqual(loadSettings(r, {}), DEFAULT_SETTINGS)
-  assert.equal(DEFAULT_SETTINGS.immersionMode, "auto")
+  assert.equal(DEFAULT_SETTINGS.immersionMode, "immersion")
   assert.equal(DEFAULT_SETTINGS.promptMode, "full")
   rmSync(r, { recursive: true, force: true })
 })
@@ -42,7 +43,18 @@ test("unknown values in the file are ignored, known ones beside them are kept", 
     JSON.stringify({ immersionMode: "loud", promptMode: "lean", extra: 1 }),
     "utf8",
   )
-  assert.deepEqual(loadSettings(r, {}), { immersionMode: "auto", promptMode: "lean" })
+  assert.deepEqual(loadSettings(r, {}), { immersionMode: "immersion", promptMode: "lean" })
+  rmSync(r, { recursive: true, force: true })
+})
+
+// A settings file written before 2026-08-30 says "auto", which used to mean
+// "only on DeepSeek" and now means "immersion". It must keep loading rather
+// than fall back to a default nobody chose.
+test("a persisted auto still loads, and now means immersion", () => {
+  const r = root()
+  writeFileSync(settingsPath(r), JSON.stringify({ immersionMode: "auto", promptMode: "full" }), "utf8")
+  assert.equal(loadSettings(r, {}).immersionMode, "auto")
+  assert.equal(loadSettings(r, { PERSONA_IMMERSION: "auto" }).immersionMode, "auto")
   rmSync(r, { recursive: true, force: true })
 })
 

@@ -12,28 +12,64 @@
 //   the injection position during training, with the most stable effect".
 //   Source: https://github.com/victorchen96/deepseek_v4_rolepaly_instruct
 //
-// WHAT IS DIFFERENT HERE, and it is the whole point of the `auto` default:
-// this stack does not serve DeepSeek. It serves Qwen3.8-27B behind forge, and
-// pi reports every model on it under the `forge` provider id. The markers are
-// exact strings a specific model was trained on; injected anywhere else they are
-// three lines of Chinese instructional text the model has no routing for.
-// openclaude's own `auto` mode declines to inject on non-DeepSeek providers for
-// that reason, and the port keeps that judgement rather than assuming it
-// transfers. `auto` here therefore resolves to "off" unless the live model
-// actually looks like DeepSeek, which is checked against ctx.model rather than
-// assumed from the provider name.
+// WHAT IS DIFFERENT HERE, and it changed on 2026-08-30.
 //
-// `immersion` and `analysis` remain selectable by hand — an operator pointing
-// this stack at a DeepSeek endpoint, or wanting to measure the markers against
-// Qwen, should not have to edit the source to try it. Nothing here is measured
-// on this stack; see ../FORK.md.
+// The first version of this port kept openclaude's gate: `auto` injected only
+// when the model looked like DeepSeek, on the reasoning that the markers are
+// exact strings one model family was trained on and are just tokens anywhere
+// else. That reasoning is still true about TRAINING. It is not a reason to
+// withhold the instruction, and treating it as one confused "was this trained
+// in" with "will this be followed".
+//
+// The markers are also, read plainly, an ordinary instruction: *think in first
+// person as the character* / *do not roleplay in your reasoning*. Any
+// instruction-followed model can act on that without having been trained on the
+// exact string. What DeepSeek's training buys is reliability, not
+// comprehension — and the failure mode the marker exists to fix was watched
+// happening on THIS stack, on Qwen, with a persona active:
+//
+//   thinking: "Well, the user said 'feel free to use your judgment' ... So
+//              participate naturally, stay in character. Probably don't have to
+//              claim to be a robot either... actually, the user is asking me to
+//              participate — Crystal is an AI assistant."
+//
+// That is precisely the "stands OUTSIDE the character and deliberates" route,
+// on a model the gate had decided was not worth sending the instruction to.
+// `THINK_LANG=zh` is also already on in this stack, so the model is being asked
+// to reason in Chinese anyway.
+//
+// So the mode no longer looks at the model at all. `off` means off; everything
+// else injects. The old `looksLikeDeepSeek()` is gone rather than left unused —
+// its one real insight is kept here because it outlived the function: on a
+// stack that serves everything through a proxy, EVERY model reports the
+// proxy's provider id (`forge`), so a provider-id check cannot identify the
+// model behind it. openclaude's `isDeepSeekProvider()` would have answered
+// "not DeepSeek" for a DeepSeek model served through forge.
+//
+// Still not measured on Qwen. It is on by default because the thing it fixes
+// was observed here and the instruction is cheap (~120 tokens, once, on the
+// first message), not because a benchmark said so.
 
-export type ImmersionMode = "auto" | "immersion" | "analysis" | "off"
+export type ImmersionMode = "immersion" | "analysis" | "off" | "auto"
 
-export const IMMERSION_MODES: ImmersionMode[] = ["auto", "immersion", "analysis", "off"]
+/** Offered in the UI and in completions. `auto` is accepted but not offered. */
+export const IMMERSION_MODES: ImmersionMode[] = ["immersion", "analysis", "off"]
+
+/**
+ * `auto` is a DEPRECATED ALIAS for `immersion`, kept only so an existing
+ * `PERSONA_IMMERSION=auto` or a persisted `persona-settings.json` keeps working
+ * rather than falling back to a default it did not ask for. It used to mean
+ * "inject only on DeepSeek"; nothing gates on the model any more.
+ */
+const ACCEPTED: string[] = [...IMMERSION_MODES, "auto"]
 
 export function isImmersionMode(v: string): v is ImmersionMode {
-  return (IMMERSION_MODES as string[]).includes(v)
+  return ACCEPTED.includes(v)
+}
+
+/** Collapse the deprecated alias. Everything downstream sees three modes. */
+export function normalizeMode(mode: ImmersionMode): Exclude<ImmersionMode, "auto"> {
+  return mode === "auto" ? "immersion" : mode
 }
 
 // Verbatim from the upstream documentation. These must NOT be translated,
@@ -53,49 +89,21 @@ export const ANALYSIS_MARKER = `
 2. 禁止以角色第一人称描写内心活动，例如"我心想""我觉得""我暗自"等，请用分析性语言替代
 3. 思考内容应聚焦于剧情走向分析和回复内容规划，不要在思考中进行角色扮演式的内心戏表演`
 
-export interface ModelIdentity {
-  id?: string
-  provider?: string
-  baseUrl?: string
-}
-
-/**
- * Whether the live model looks like DeepSeek.
- *
- * Checked against the model id and baseUrl as well as the provider, because on
- * this stack the provider is always `forge` — a proxy in front of llama.cpp —
- * so "provider === 'deepseek'" would be false for a genuinely DeepSeek model
- * served through it, and the auto mode would silently never fire for the one
- * case it exists to serve.
- */
-export function looksLikeDeepSeek(model: ModelIdentity | undefined | null): boolean {
-  if (!model) return false
-  const haystack = [model.provider, model.id, model.baseUrl]
-    .filter((s): s is string => typeof s === "string")
-    .join(" ")
-    .toLowerCase()
-  return haystack.includes("deepseek")
-}
-
 /**
  * Which marker to inject, or null for none.
  *
  *   off        -> null
  *   no persona -> null   (the marker only makes sense with a character to be)
- *   immersion  -> IMMERSION_MARKER
+ *   immersion  -> IMMERSION_MARKER   (also `auto`, the deprecated alias)
  *   analysis   -> ANALYSIS_MARKER
- *   auto       -> IMMERSION_MARKER on a DeepSeek-looking model, else null
+ *
+ * The live model is not consulted. See this file's header for why that gate
+ * was removed.
  */
-export function chooseMarker(
-  mode: ImmersionMode,
-  hasPersona: boolean,
-  model: ModelIdentity | undefined | null,
-): string | null {
+export function chooseMarker(mode: ImmersionMode, hasPersona: boolean): string | null {
   if (mode === "off") return null
   if (!hasPersona) return null
-  if (mode === "immersion") return IMMERSION_MARKER
-  if (mode === "analysis") return ANALYSIS_MARKER
-  return looksLikeDeepSeek(model) ? IMMERSION_MARKER : null
+  return normalizeMode(mode) === "analysis" ? ANALYSIS_MARKER : IMMERSION_MARKER
 }
 
 export interface PriorMessage {
@@ -134,12 +142,11 @@ export function maybeAppendMarker(
   prior: readonly PriorMessage[],
   mode: ImmersionMode,
   hasPersona: boolean,
-  model: ModelIdentity | undefined | null,
 ): string {
   if (typeof text !== "string") return text
   if (text.trimStart().startsWith("/")) return text
   if (!isFirstUserTurn(prior)) return text
-  const marker = chooseMarker(mode, hasPersona, model)
+  const marker = chooseMarker(mode, hasPersona)
   if (!marker) return text
   return text + marker
 }

@@ -133,7 +133,7 @@ An unknown window (pi reports none before the first response) falls back to
 8 KB: guessing large is the expensive mistake, and the jq path works at every
 size.
 
-### 5. The immersion marker is off, and `auto` is honest about why
+### 5. The immersion marker is ON, and it does not look at the model
 
 openclaude injects a Chinese instruction block at the end of the first user
 message. It is not decoration: DeepSeek-V4's roleplay training has a
@@ -143,32 +143,59 @@ whether to comply — instead of thinking in character.
 ([source](https://github.com/victorchen96/deepseek_v4_rolepaly_instruct); the
 upstream FAQ is explicit that the system prompt is the wrong place for it.)
 
-**This stack does not serve DeepSeek.** It serves Qwen3.8-27B behind forge. The
-markers are exact strings one model family was trained on; anywhere else they
-are three lines of Chinese instructional text with no routing behind them.
-openclaude's own `auto` mode declines to inject on non-DeepSeek providers, and
-the port keeps that judgement rather than assuming it transfers.
+**This port shipped with openclaude's gate and then removed it (2026-08-30).**
+The first version kept `auto` meaning "inject only on a DeepSeek-looking model",
+reasoning that the markers are exact strings one family was trained on and are
+just tokens anywhere else.
 
-One thing was changed. openclaude decides with `isDeepSeekProvider()` — a
-provider-id check. On this stack every model is served under the provider id
-`forge`, so a genuinely DeepSeek model behind the proxy would be read as
-not-DeepSeek and `auto` would never fire for the one case it exists for.
-`looksLikeDeepSeek()` checks the model id and base URL as well.
-`tests/immersion.test.ts` pins that case by name.
+That reasoning is true about *training*, and it is not a reason to withhold the
+instruction. It confused "was this trained in" with "will this be followed".
+Read plainly, the markers are an ordinary instruction — *think in first person as
+the character* / *do not roleplay in your reasoning* — and any instruction-following
+model can act on that without having seen the exact string. DeepSeek's training
+buys reliability, not comprehension.
 
-`immersion` and `analysis` stay selectable by hand (`/persona immersion <mode>`,
-or `PERSONA_IMMERSION=` for one launch). **Nothing here is measured on Qwen.**
-`THINK_LANG=zh` is already on in this stack, so the model is being asked to
-reason in Chinese anyway, which makes the markers less alien here than on a
-generic setup — that is a reason to try it, not a result.
+And the failure it exists to fix was then watched happening **on this stack, on
+Qwen, with a persona active**:
 
-One correctness fix on the way through: the extraction turn is delivered with
-`pi.sendUserMessage()` and therefore lands in the session as a **user** message.
-Without a guard it consumes the first turn, and the marker then attaches to the
-user's *second* message — one message later than the position the whole
-mechanism is documented against. `PROCESS_PROMPT_PREFIX` fingerprints the
-extraction prompt so `isFirstUserTurn` skips it; the extension test drives that
-path through a real built prompt rather than a fixture of one.
+```
+thinking: "Well, the user said 'feel free to use your judgment' ... So
+           participate naturally, stay in character. Probably don't have to
+           claim to be a robot either... actually, the user is asking me to
+           participate — Crystal is an AI assistant."
+```
+
+That is exactly the deliberating-from-outside-the-character route, on a model the
+gate had decided was not worth sending the instruction to. `THINK_LANG=zh` is
+also already on in this stack, so the model is being asked to reason in Chinese
+regardless.
+
+So `chooseMarker` no longer takes a model at all, and the default is
+`immersion`. `off` means off; `analysis` is the same re-routing with a clean
+reasoning trace instead of an in-character inner monologue, which is the better
+choice if the bracketed internal monologue gets noisy on a long engineering task.
+`auto` is accepted as a **deprecated alias for `immersion`** — an existing
+`PERSONA_IMMERSION=auto` or a persisted `persona-settings.json` keeps working
+rather than falling back to a mode nobody chose — but it is not offered in the
+UI or in completions.
+
+**Still unmeasured on Qwen.** It is on because the thing it fixes was observed
+here and the instruction costs ~120 tokens once, on the first message of a
+session — not because a benchmark said so. `/persona immersion off` is one
+command and takes effect on the next session.
+
+`looksLikeDeepSeek()` is **deleted** rather than left unused, but its one real
+insight outlived it and is kept in the file header: on a stack that serves
+everything through a proxy, every model reports the *proxy's* provider id
+(`forge`), so a provider-id check cannot identify the model behind it.
+openclaude's `isDeepSeekProvider()` would have answered "not DeepSeek" for a
+DeepSeek model served through forge — the one case the gate existed for.
+
+One correctness fix survives unchanged from the first version: the extraction
+turn is delivered with `pi.sendUserMessage()` and lands in the session as a
+**user** message, so without a guard it consumes the first turn and the marker
+attaches one message late. `PROCESS_PROMPT_PREFIX` fingerprints it so
+`isFirstUserTurn` skips it.
 
 ### 6. Ambiguity is a question, not a tool call
 
