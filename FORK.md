@@ -305,7 +305,7 @@ src/settings.ts     persisted modes; the environment wins over the file
 extensions/index.ts the pi coupling: command, before_agent_start, input, status
 ```
 
-**103 tests.** `tests/extension.test.ts` redirects pi's bare specifier onto the
+**109 tests.** `tests/extension.test.ts` redirects pi's bare specifier onto the
 installed package with `module.registerHooks`, so the factory runs against the
 same import a session would — a renamed export fails there. It skips itself when
 pi is not on PATH, and its "source guarantees" block runs everywhere, so a

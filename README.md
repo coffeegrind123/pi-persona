@@ -103,8 +103,9 @@ persisted file:
 npm run lint && npm test
 ```
 
-103 tests. The extension suite drives the real factory against the installed pi;
-it skips itself when pi is not on PATH, and the source assertions run anyway.
+The extension suite drives the real factory against the installed pi, so a
+renamed export fails there rather than at a user's next launch; it skips itself
+when pi is not on PATH, and the source assertions run anyway.
 
 See `FORK.md` for provenance, the six departures from upstream, and the
 measurements.

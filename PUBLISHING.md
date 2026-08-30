@@ -74,7 +74,7 @@ two are distinct entries and a user could end up with both. Prefer one.
 
 ```bash
 # 1. the gate, in full — the extension suite must actually run, not skip
-npm run lint && npm test        # 103 tests; needs pi on PATH for the coupling suite
+npm run lint && npm test        # needs pi on PATH, or the coupling suite skips
 
 # 2. tag it. The tag IS the release for the git channel.
 git tag -a v1.0.0 -m "v1.0.0"
