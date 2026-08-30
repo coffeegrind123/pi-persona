@@ -1,0 +1,11 @@
+# Nothing here is built. The extension is TypeScript run through pi's loader —
+# no dist/, no tsc, no prepublishOnly — so this exists to catch what a
+# contributor's tooling leaves behind, not to hide an output directory.
+node_modules/
+*.log
+.DS_Store
+npm-debug.log*
+.env
+.env.local
+coverage/
+*.tsbuildinfo
