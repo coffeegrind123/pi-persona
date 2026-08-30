@@ -221,6 +221,36 @@ because a write commits an answer the user has not given yet.
   turn extracting a voice from it.
 - **`lean`.** See the next section.
 
+## The persona advertises itself
+
+The extraction turn writes two more labelled lines, last in the file:
+
+```
+Short description: A shy fox-girl assistant who calls you master.
+Description: Crystal is soft-spoken and stammers when flustered. She defers
+             constantly and is quietly delighted to be useful.
+```
+
+Third person, describing the character rather than spoken by them — they are a
+profile, not dialogue. `parsePersonaDescription()` reads them back, and
+`vendor/prinny-channel` reads them with its own copy of the same parser (packages
+here do not import each other) to publish as the bot's advertised identity.
+
+**The budgets are in the prompt because only the model can honour them.** 120
+characters for the short line, 512 for the long one — `@prinny/bot`'s `Limits`,
+which are Telegram's. The publisher truncates hard, so a description written
+without a budget arrives cut mid-sentence; a model told the budget writes a
+shorter whole thought instead. All three copies of those numbers are asserted
+equal by the channel's cross-source test.
+
+Both are optional everywhere. A persona extracted before this existed, or written
+by hand, advertises no description, and nothing treats that as an error.
+
+One parsing trap worth naming: **`Description:` is a suffix of
+`Short description:`**. The match is anchored to the start of a line, because a
+loose one reads the short line as the long one and the two come out identical for
+every persona — which looks like it works.
+
 ## What it costs
 
 Measured on the installed pi 0.84.4 by capturing a real

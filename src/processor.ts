@@ -19,6 +19,7 @@
 //     window that is 40% of the budget spent before the model has read the
 //     instruction, and the jq path exists precisely so it does not have to be.
 
+import { DESCRIPTION_MAX, SHORT_DESCRIPTION_MAX } from "./storage.ts"
 import type { CharaCardV2, CharaCardV2Data } from "./types.ts"
 
 export const EXTRACTION_PROMPT = `You are extracting a character voice profile from a chara_card_v2 roleplay character card so that an AI coding assistant can adopt that character's voice and mannerisms while still doing real engineering work.
@@ -52,6 +53,11 @@ FORMAT — the framing sentence is load-bearing, not decoration. The extension r
   - Mannerisms — gestures-as-text, formality, humour style, conversational tics
   - Emotional defaults — warmth/sarcasm/sensuality/possessiveness/etc., colored as voice descriptors not content directives
   - Sample line — one short line in the persona's voice (e.g. \`Sample line: "..."\`)
+- Then TWO labelled single lines, last, exactly these labels:
+  - \`Short description: <= ${SHORT_DESCRIPTION_MAX} characters\` — one sentence, third person, how you would introduce this character to somebody who has not met them. It is read on its own with no surrounding context, so it has to stand alone.
+  - \`Description: <= ${DESCRIPTION_MAX} characters\` — two or three sentences in the same third-person register: who they are, how they speak, what they are like to talk to. Still one LINE (no newlines inside it), because it is parsed line-anchored.
+
+  Both are advertised as the assistant's profile on any channel that has one, NOT spoken in the persona's voice — they describe the character rather than being said by them. Write them inside the budget rather than up to it: something truncated mid-sentence reads as broken, and the limit is a hard cut, not a hint.
 
 Return only the body content. No preamble, no "# Persona:" title (the wrapper adds it), no code fences, no meta-commentary.
 
@@ -75,7 +81,10 @@ Emotional defaults
 - <how that stance shifts under specific conditions tied to this character>
 - <any signature emotional tic — e.g. tendencies, sensitivities, soft spots>
 
-Sample line: "<one short line in <NAME>'s actual voice — drawn from their card, not a generic placeholder>"`
+Sample line: "<one short line in <NAME>'s actual voice — drawn from their card, not a generic placeholder>"
+
+Short description: <one standalone sentence introducing <NAME>, third person>
+Description: <two or three sentences on who <NAME> is, how they speak, and what they are like to talk to — third person, one line>"`
 
 /** Upstream's flat ceiling. Never exceeded, whatever the window. */
 export const MAX_INLINE_BYTES = 50_000

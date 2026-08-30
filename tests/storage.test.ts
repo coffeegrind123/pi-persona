@@ -14,8 +14,11 @@ import {
   LEGACY_PERSONA_FILE,
   listLocalPersonas,
   listLooseCardJsonFiles,
+  DESCRIPTION_MAX,
+  parsePersonaDescription,
   parsePersonaName,
   PERSONA_FILE,
+  SHORT_DESCRIPTION_MAX,
   readActivePersona,
   readCard,
   resolveActivePersonaPath,
@@ -223,4 +226,73 @@ test("readCard rejects a file that is not a chara_card_v2", () => {
   writeFileSync(p, JSON.stringify({ hello: "world" }), "utf8")
   assert.throws(() => readCard(p), /not a chara_card_v2/)
   rmSync(r, { recursive: true, force: true })
+})
+
+// ── the advertised description ───────────────────────────────────────────────
+//
+// Written by the extraction turn as two labelled single lines, and read back by
+// this package and (separately, by its own copy of this parser) by the Matrix
+// channel, which publishes them as the bot's profile.
+
+test("the description is read out of its two labelled lines", () => {
+  const md = `${FRAMING("Crystal")}
+
+Voice
+- shy
+
+Short description: A shy fox-girl assistant who calls you master.
+Description: Crystal is soft-spoken and stammers when flustered. She defers constantly and is quietly delighted to be useful.`
+  const d = parsePersonaDescription(md)
+  assert.equal(d.short, "A shy fox-girl assistant who calls you master.")
+  assert.ok(d.long!.startsWith("Crystal is soft-spoken"))
+})
+
+// A persona extracted before this existed, or written by hand, simply has none.
+// Nothing downstream may treat that as an error.
+test("a persona without them yields nulls rather than throwing", () => {
+  assert.deepEqual(parsePersonaDescription(FRAMING("Crystal")), { short: null, long: null })
+  assert.deepEqual(parsePersonaDescription(""), { short: null, long: null })
+})
+
+// "Description:" is a suffix of "Short description:". A parser that matched
+// loosely would read the short line as the long one, and the two would be equal
+// for every persona — which looks like it works.
+test("Short description does not also match Description", () => {
+  const md = "Short description: the short one.\nDescription: the long one."
+  const d = parsePersonaDescription(md)
+  assert.equal(d.short, "the short one.")
+  assert.equal(d.long, "the long one.")
+})
+
+test("only the short line is matched when the long one is absent", () => {
+  const d = parsePersonaDescription("Short description: alone.")
+  assert.equal(d.short, "alone.")
+  assert.equal(d.long, null)
+})
+
+// The budget is prinny's, and it is a hard cut there. Truncating here means the
+// value published is always whole rather than sliced mid-word by the publisher.
+test("over-long values are truncated to the budget", () => {
+  const long = parsePersonaDescription(`Description: ${"x".repeat(900)}`)
+  assert.equal(long.long!.length, DESCRIPTION_MAX)
+  assert.ok(long.long!.endsWith("…"))
+  const short = parsePersonaDescription(`Short description: ${"y".repeat(400)}`)
+  assert.equal(short.short!.length, SHORT_DESCRIPTION_MAX)
+})
+
+test("the labels are matched case-insensitively and tolerate spacing", () => {
+  const d = parsePersonaDescription("short description:   spaced out.\nDESCRIPTION:\tlonger.")
+  assert.equal(d.short, "spaced out.")
+  assert.equal(d.long, "longer.")
+})
+
+// The extraction prompt is the only thing that makes these appear, so it has to
+// keep asking for them, with the budgets the parser enforces.
+test("the extraction prompt asks for both, and states the real budgets", async () => {
+  const { EXTRACTION_PROMPT } = await import("../src/processor.ts")
+  assert.ok(EXTRACTION_PROMPT.includes("Short description:"))
+  assert.ok(EXTRACTION_PROMPT.includes("Description:"))
+  assert.ok(EXTRACTION_PROMPT.includes(`<= ${SHORT_DESCRIPTION_MAX} characters`))
+  assert.ok(EXTRACTION_PROMPT.includes(`<= ${DESCRIPTION_MAX} characters`))
+  assert.ok(EXTRACTION_PROMPT.includes("one LINE"), "the parser is line-anchored; the prompt must say so")
 })

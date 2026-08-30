@@ -222,6 +222,53 @@ export function parsePersonaName(md: string): string | null {
   return narrow?.[1] ?? null
 }
 
+/**
+ * Character budgets for the persona's advertised profile.
+ *
+ * These are prinny's (`@prinny/bot`'s `Limits`, which are Telegram's), and they
+ * are duplicated here rather than imported: this package must not depend on the
+ * Matrix channel, and the channel must not depend on this one. The channel's
+ * `tests/persona-profile.test.ts` asserts the two sets agree — the same
+ * arrangement the compaction lock and the approved-command key already use.
+ *
+ * They live here at all because the EXTRACTION has to know them: a description
+ * written without a budget gets truncated mid-sentence by whoever publishes it,
+ * and the model is the only thing that can write a shorter one that still reads
+ * as a whole thought.
+ */
+export const SHORT_DESCRIPTION_MAX = 120
+export const DESCRIPTION_MAX = 512
+
+export interface PersonaDescription {
+  /** One line, <= SHORT_DESCRIPTION_MAX. */
+  short: string | null
+  /** A paragraph, <= DESCRIPTION_MAX. */
+  long: string | null
+}
+
+/**
+ * The persona's advertised description, written by the extraction turn.
+ *
+ * Both are optional and both are null for a persona extracted before this
+ * existed, or written by hand. Nothing downstream may treat their absence as an
+ * error — a persona with no description simply advertises none.
+ *
+ * Read with a line-anchored match rather than a parser: the file is prose the
+ * model wrote, and the two fields are the only labelled single lines in it.
+ */
+export function parsePersonaDescription(md: string): PersonaDescription {
+  const one = (label: string, max: number): string | null => {
+    const m = md.match(new RegExp(`^${label}:[ \\t]*(.+)$`, "im"))
+    const value = m?.[1]?.trim()
+    if (!value) return null
+    return value.length <= max ? value : `${value.slice(0, max - 1)}\u2026`
+  }
+  return {
+    short: one("Short description", SHORT_DESCRIPTION_MAX),
+    long: one("Description", DESCRIPTION_MAX),
+  }
+}
+
 let cachedName: { path: string; mtimeMs: number; name: string | null } | null = null
 
 export function invalidateNameCache(): void {
