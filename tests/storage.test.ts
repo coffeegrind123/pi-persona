@@ -14,7 +14,7 @@ import {
   LEGACY_PERSONA_FILE,
   listLocalPersonas,
   listLooseCardJsonFiles,
-  DESCRIPTION_MAX,
+  ABOUT_ME_MAX,
   parsePersonaDescription,
   parsePersonaName,
   PERSONA_FILE,
@@ -241,49 +241,51 @@ Voice
 - shy
 
 Short description: A shy fox-girl assistant who calls you master.
-Description: Crystal is soft-spoken and stammers when flustered. She defers constantly and is quietly delighted to be useful.`
+About me: H-hi! I'm Crystal, and I look after my master. I stammer when I'm flustered, which is often.`
   const d = parsePersonaDescription(md)
   assert.equal(d.short, "A shy fox-girl assistant who calls you master.")
-  assert.ok(d.long!.startsWith("Crystal is soft-spoken"))
+  assert.ok(d.aboutMe!.startsWith("H-hi!"), "About me is the character speaking, first person")
 })
 
 // A persona extracted before this existed, or written by hand, simply has none.
 // Nothing downstream may treat that as an error.
 test("a persona without them yields nulls rather than throwing", () => {
-  assert.deepEqual(parsePersonaDescription(FRAMING("Crystal")), { short: null, long: null })
-  assert.deepEqual(parsePersonaDescription(""), { short: null, long: null })
+  assert.deepEqual(parsePersonaDescription(FRAMING("Crystal")), { short: null, aboutMe: null })
+  assert.deepEqual(parsePersonaDescription(""), { short: null, aboutMe: null })
 })
 
 // "Description:" is a suffix of "Short description:". A parser that matched
 // loosely would read the short line as the long one, and the two would be equal
 // for every persona — which looks like it works.
-test("Short description does not also match Description", () => {
-  const md = "Short description: the short one.\nDescription: the long one."
+// The two labels are distinct now, but the line anchor still matters: a loose
+// match would let a "Short description" line satisfy a search for a suffix of it.
+test("the two labels do not match each other", () => {
+  const md = "Short description: the short one.\nAbout me: the first-person one."
   const d = parsePersonaDescription(md)
   assert.equal(d.short, "the short one.")
-  assert.equal(d.long, "the long one.")
+  assert.equal(d.aboutMe, "the first-person one.")
 })
 
-test("only the short line is matched when the long one is absent", () => {
+test("only the short line is matched when About me is absent", () => {
   const d = parsePersonaDescription("Short description: alone.")
   assert.equal(d.short, "alone.")
-  assert.equal(d.long, null)
+  assert.equal(d.aboutMe, null)
 })
 
 // The budget is prinny's, and it is a hard cut there. Truncating here means the
 // value published is always whole rather than sliced mid-word by the publisher.
 test("over-long values are truncated to the budget", () => {
-  const long = parsePersonaDescription(`Description: ${"x".repeat(900)}`)
-  assert.equal(long.long!.length, DESCRIPTION_MAX)
-  assert.ok(long.long!.endsWith("…"))
+  const long = parsePersonaDescription(`About me: ${"x".repeat(2000)}`)
+  assert.equal(long.aboutMe!.length, ABOUT_ME_MAX)
+  assert.ok(long.aboutMe!.endsWith("…"))
   const short = parsePersonaDescription(`Short description: ${"y".repeat(400)}`)
   assert.equal(short.short!.length, SHORT_DESCRIPTION_MAX)
 })
 
 test("the labels are matched case-insensitively and tolerate spacing", () => {
-  const d = parsePersonaDescription("short description:   spaced out.\nDESCRIPTION:\tlonger.")
+  const d = parsePersonaDescription("short description:   spaced out.\nABOUT ME:\tfirst person.")
   assert.equal(d.short, "spaced out.")
-  assert.equal(d.long, "longer.")
+  assert.equal(d.aboutMe, "first person.")
 })
 
 // The extraction prompt is the only thing that makes these appear, so it has to
@@ -291,8 +293,11 @@ test("the labels are matched case-insensitively and tolerate spacing", () => {
 test("the extraction prompt asks for both, and states the real budgets", async () => {
   const { EXTRACTION_PROMPT } = await import("../src/processor.ts")
   assert.ok(EXTRACTION_PROMPT.includes("Short description:"))
-  assert.ok(EXTRACTION_PROMPT.includes("Description:"))
+  assert.ok(EXTRACTION_PROMPT.includes("About me:"))
   assert.ok(EXTRACTION_PROMPT.includes(`<= ${SHORT_DESCRIPTION_MAX} characters`))
-  assert.ok(EXTRACTION_PROMPT.includes(`<= ${DESCRIPTION_MAX} characters`))
+  assert.ok(EXTRACTION_PROMPT.includes(`<= ${ABOUT_ME_MAX} characters`))
   assert.ok(EXTRACTION_PROMPT.includes("one LINE"), "the parser is line-anchored; the prompt must say so")
+  // The voice is the whole point of About me and the easy thing to get backwards.
+  assert.ok(EXTRACTION_PROMPT.includes("FIRST PERSON"), "About me must be asked for in first person")
+  assert.ok(EXTRACTION_PROMPT.includes("DIFFERENT VOICES"))
 })

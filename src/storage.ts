@@ -237,13 +237,23 @@ export function parsePersonaName(md: string): string | null {
  * as a whole thought.
  */
 export const SHORT_DESCRIPTION_MAX = 120
-export const DESCRIPTION_MAX = 512
+/**
+ * The "About Me" budget, from the client that renders it: cinny's biography
+ * TextArea is `maxLength={1024}`. Not a protocol limit — MSC4440 states none —
+ * which is exactly why it is worth writing down where it came from.
+ */
+export const ABOUT_ME_MAX = 1024
 
 export interface PersonaDescription {
-  /** One line, <= SHORT_DESCRIPTION_MAX. */
+  /** One line, third person, <= SHORT_DESCRIPTION_MAX. Advertised as the bot's. */
   short: string | null
-  /** A paragraph, <= DESCRIPTION_MAX. */
-  long: string | null
+  /**
+   * FIRST PERSON, <= ABOUT_ME_MAX. Published as the `gay.fomx.biography`
+   * extended profile field, which every prinny client renders under "About Me"
+   * on a profile card. It is the character talking about themselves, so it is
+   * the one piece of persona text that is not third person.
+   */
+  aboutMe: string | null
 }
 
 /**
@@ -252,6 +262,12 @@ export interface PersonaDescription {
  * Both are optional and both are null for a persona extracted before this
  * existed, or written by hand. Nothing downstream may treat their absence as an
  * error — a persona with no description simply advertises none.
+ *
+ * The two are in DIFFERENT VOICES on purpose. `Short description` is a bot
+ * advertisement — third person, "who is this". `About me` is the profile card's
+ * biography, which every other account on the homeserver fills in about itself,
+ * so a character writing it in the third person would read as a bot pretending
+ * to be a person and failing.
  *
  * Read with a line-anchored match rather than a parser: the file is prose the
  * model wrote, and the two fields are the only labelled single lines in it.
@@ -265,7 +281,7 @@ export function parsePersonaDescription(md: string): PersonaDescription {
   }
   return {
     short: one("Short description", SHORT_DESCRIPTION_MAX),
-    long: one("Description", DESCRIPTION_MAX),
+    aboutMe: one("About me", ABOUT_ME_MAX),
   }
 }
 

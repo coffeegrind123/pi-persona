@@ -221,24 +221,29 @@ because a write commits an answer the user has not given yet.
   turn extracting a voice from it.
 - **`lean`.** See the next section.
 
-## The persona advertises itself
+## The persona advertises itself, and introduces itself
 
 The extraction turn writes two more labelled lines, last in the file:
 
 ```
 Short description: A shy fox-girl assistant who calls you master.
-Description: Crystal is soft-spoken and stammers when flustered. She defers
-             constantly and is quietly delighted to be useful.
+About me: H-hi! I'm Crystal, and I look after my master. I stammer when I'm
+          flustered, which is often.
 ```
 
-Third person, describing the character rather than spoken by them — they are a
-profile, not dialogue. `parsePersonaDescription()` reads them back, and
+**They are in different voices, and that is the point.** `Short description` is
+third person — a label, how you would introduce this character to somebody who
+has not met them, advertised as the bot's own description. `About me` is the
+character SPEAKING: it becomes the "About Me" box on their profile card, which
+is the box every account on the homeserver fills in about itself, so a
+third-person one reads as a bot pretending to be a person and failing. `parsePersonaDescription()` reads them back, and
 `vendor/prinny-channel` reads them with its own copy of the same parser (packages
 here do not import each other) to publish as the bot's advertised identity.
 
 **The budgets are in the prompt because only the model can honour them.** 120
-characters for the short line, 512 for the long one — `@prinny/bot`'s `Limits`,
-which are Telegram's. The publisher truncates hard, so a description written
+characters for the short line (`@prinny/bot`'s `Limits`, which are Telegram's)
+and 1024 for About me (cinny's own `TextArea maxLength`; MSC4440 states no
+limit). The publisher truncates hard, so a description written
 without a budget arrives cut mid-sentence; a model told the budget writes a
 shorter whole thought instead. All three copies of those numbers are asserted
 equal by the channel's cross-source test.
@@ -246,10 +251,10 @@ equal by the channel's cross-source test.
 Both are optional everywhere. A persona extracted before this existed, or written
 by hand, advertises no description, and nothing treats that as an error.
 
-One parsing trap worth naming: **`Description:` is a suffix of
-`Short description:`**. The match is anchored to the start of a line, because a
-loose one reads the short line as the long one and the two come out identical for
-every persona — which looks like it works.
+The match is anchored to the start of a line: the labels are prose in a file the
+model wrote, and a loose match would let one label satisfy a search for a suffix
+of another. Getting the two VOICES backwards is the likelier mistake, so the
+prompt says so twice and a test asserts it still does.
 
 ## What it costs
 
