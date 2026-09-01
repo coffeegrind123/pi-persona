@@ -13,8 +13,15 @@
 // The window cost, measured (see FORK.md): with no persona active this
 // extension contributes ZERO tokens — before_agent_start returns undefined and
 // nothing is registered on the tool surface. With one active it prepends a
-// block of ~3,584 tokens (`full`) or ~2,311 (`lean`) that is byte-stable across
+// block of ~4,215 tokens (`full`) or ~2,516 (`lean`) that is byte-stable across
 // turns, so it costs one prefix re-prefill at activation and nothing after.
+//
+// One exception, and it is deliberate: a session that adopted a persona, spoke
+// in it, and then switched or cleared it carries a retirement notice (~220
+// tokens inside the block, ~240 as a `<persona_cleared>` block of its own). That
+// is the half of a persona switch a file deletion cannot do — the transcript is
+// still full of the old voice — and FORK.md's "Switching a persona switches the
+// old one OFF" has the account.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { basename } from "node:path"
@@ -38,6 +45,7 @@ import {
 } from "../src/immersion.ts"
 import {
   buildPersonaSection,
+  buildRetiredVoiceSection,
   estimateTokens,
   isPromptMode,
   PROMPT_MODES,
@@ -48,6 +56,12 @@ import {
   isProcessPrompt,
 } from "../src/processor.ts"
 import { loadSettings, saveSettings, type PersonaSettings } from "../src/settings.ts"
+import {
+  hasSpokenTurns,
+  readRetiredPersona,
+  shouldAnnounceRetired,
+  SWITCH_ENTRY_TYPE,
+} from "../src/switch.ts"
 import { describeCard, flattenCardForViewer } from "../src/sections.ts"
 import {
   clearActive,
@@ -87,6 +101,80 @@ export default function personaExtension(pi: ExtensionAPI) {
   const root = getAgentDir()
   let settings: PersonaSettings = loadSettings(root)
 
+  /**
+   * A persona this session switched off, and had already spoken in.
+   *
+   * Restored from the session branch on every `session_start`, so a resumed or
+   * compacted session keeps the notice: the transcript survives both, and a
+   * notice that lapses exactly when the history it is about is the only thing
+   * left is the wrong way round. See ../src/switch.ts.
+   */
+  let retiredPersona: string | null = null
+
+  /**
+   * The session's entries, preferring the BRANCH.
+   *
+   * `getBranch()` is the active conversation path — the one pi replays and the
+   * one custom entries are read back off (vendor/pi-loop-mode's `restoreState`
+   * is the same call). `getEntries()` is the fallback for a pi that predates it
+   * and for the test harness; both are wrapped because either can throw on a
+   * context that has been invalidated by a session swap.
+   */
+  function sessionEntries(ctx: ExtensionContext): readonly unknown[] {
+    const sm = ctx.sessionManager as unknown as {
+      getBranch?: () => unknown[]
+      getEntries?: () => unknown[]
+    }
+    try {
+      const branch = sm?.getBranch?.()
+      if (Array.isArray(branch)) return branch
+    } catch {
+      /* fall through to getEntries */
+    }
+    try {
+      return sm?.getEntries?.() ?? []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Switch the current persona OFF, and remember whose voice the transcript is
+   * now carrying.
+   *
+   * Every path that selects a new persona goes through this first — activation
+   * from the library, extraction from a card, and `/persona clear`. Switching
+   * off is not the same as overwriting: the extraction path in particular used
+   * to run the turn that writes <New>'s voice profile with <Old>'s whole
+   * `<active_persona>` block at offset 0 of its system prompt, and the
+   * contaminated profile was then cached in the library and re-used for every
+   * later activation of that card. See ../src/switch.ts for the full account.
+   *
+   * `removed` and `retired` are separate answers to separate questions: a
+   * persona file whose framing sentence cannot be parsed is still a persona that
+   * was switched off, and reporting it as "there was no active persona" would be
+   * a lie told by a regex.
+   */
+  function retireActive(ctx: ExtensionContext): { removed: boolean; retired: string | null } {
+    const outgoing = getActivePersonaName(root)
+    const removed = clearActive(root)
+    if (!removed || !outgoing) return { removed, retired: null }
+    // Recorded only when the model has actually spoken. A persona switched off
+    // before it ever produced a turn left nothing in the transcript to bleed,
+    // and naming it would spend ~220 tokens at offset 0 for the rest of the
+    // session introducing the model to a character it has never seen. The USER
+    // is still told — their persona really was removed.
+    if (!hasSpokenTurns(sessionEntries(ctx))) return { removed, retired: outgoing }
+    retiredPersona = outgoing
+    try {
+      pi.appendEntry(SWITCH_ENTRY_TYPE, { retired: outgoing, at: new Date().toISOString() })
+    } catch (err) {
+      // The in-memory copy still carries the session; only a resume loses it.
+      console.warn("[persona] could not persist the persona switch", err)
+    }
+    return { removed, retired: outgoing }
+  }
+
   // ── status line ──────────────────────────────────────────────────────────
   // The one visible sign that a persona is on. Without it a session that
   // adopted a persona three compactions ago looks exactly like one that did
@@ -99,6 +187,10 @@ export default function personaExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     settings = loadSettings(root)
+    // Per SESSION, and this module is per PROCESS: a swap must not carry the
+    // previous session's retirement into a branch that never had that voice in
+    // it. Read unconditionally, so an empty branch clears it.
+    retiredPersona = readRetiredPersona(sessionEntries(ctx))
     refreshStatus(ctx)
   })
 
@@ -111,7 +203,16 @@ export default function personaExtension(pi: ExtensionAPI) {
   pi.on("before_agent_start", async event => {
     try {
       const body = readActivePersona(root)
-      if (!body) return undefined
+      if (!body) {
+        // No persona, but this session HAD one and spoke in it. The block is off
+        // the prompt; the transcript is not, and "the neutral voice returns next
+        // turn" is only true if something says so. ~240 tokens, byte-stable for
+        // the rest of the session, and nothing at all in a session that never
+        // adopted one.
+        const cleared = buildRetiredVoiceSection(retiredPersona)
+        if (!cleared) return undefined
+        return { systemPrompt: `${cleared}\n\n${event.systemPrompt}` }
+      }
       const name = parsePersonaName(body) ?? "Custom"
       const section = buildPersonaSection({
         name,
@@ -122,6 +223,10 @@ export default function personaExtension(pi: ExtensionAPI) {
         tools: event.systemPromptOptions?.selectedTools,
         mode: settings.promptMode,
         commandName: COMMAND,
+        // Suppressed by buildPersonaSection when it matches `name` — re-selecting
+        // the persona you are already wearing retires it and brings it straight
+        // back, and there is no bleed between a voice and itself.
+        retired: retiredPersona,
       })
       if (!section) return undefined
       return { systemPrompt: `${section}\n\n${event.systemPrompt}` }
@@ -190,12 +295,37 @@ export default function personaExtension(pi: ExtensionAPI) {
 
   // ── activation ───────────────────────────────────────────────────────────
 
-  /** Copy a library persona straight to the active slot. No model turn. */
-  function activateCached(personaPath: string): string {
+  /**
+   * Copy a library persona straight to the active slot. No model turn.
+   *
+   * The outgoing persona is switched off first rather than overwritten. The
+   * file write is the same either way; what `retireActive` adds is the record
+   * of whose voice the transcript is carrying, which is the half of the switch
+   * a file write cannot do.
+   */
+  function activateCached(
+    ctx: ExtensionContext,
+    personaPath: string,
+  ): { name: string; retired: string | null } {
     const body = readFileSync(personaPath, "utf8")
+    const { retired } = retireActive(ctx)
     writeFileSync(getActivePersonaPath(root), body, "utf8")
     invalidateNameCache()
-    return parsePersonaName(body) ?? "Custom"
+    return { name: parsePersonaName(body) ?? "Custom", retired }
+  }
+
+  /**
+   * Add "and here is what happened to the one you had" to a notify line.
+   *
+   * The recovery half is not a nicety. Switching off before an EXTRACTION means
+   * a session that abandons it — the model asks a clarifying question and the
+   * user walks away, the card turns out to be the wrong one — ends up with no
+   * persona at all. Re-activating from the library costs no model turn, and the
+   * user has to be told that before they need it rather than after.
+   */
+  function withSwitchNote(head: string, retired: string | null, incoming: string): string {
+    if (!retired || retired.toLowerCase() === incoming.toLowerCase()) return head
+    return `${head}\nSwitched ${retired} off first so their voice does not bleed into ${incoming}. /${COMMAND} local brings ${retired} back without a model turn.`
   }
 
   /**
@@ -208,7 +338,18 @@ export default function personaExtension(pi: ExtensionAPI) {
     card: CharaCardV2,
     source: { sourceUrl?: string; projectId?: number; avatarUrl?: string },
   ): void {
+    // Staged FIRST: everything here that can throw does so before the active
+    // persona is touched, so a card that cannot be written to disk does not
+    // leave the session with no persona and no extraction either.
     const staged = stageCardForProcessing(root, card, source)
+    // Then switched off, BEFORE the turn is built or sent. `sendUserMessage`
+    // reaches `AgentSession.prompt()`, which is the one call site pi emits
+    // `before_agent_start` from — so the extraction turn's system prompt is
+    // rebuilt, and with the file gone it is rebuilt without the outgoing
+    // persona's block. That is the whole point: this turn writes a PERSISTENT
+    // artefact, and a profile written under <Old>'s "everything you say comes
+    // out in <Old>'s voice" is cached in the library and re-used forever.
+    const { retired } = retireActive(ctx)
     const contextWindow = ctx.getContextUsage()?.contextWindow ?? ctx.model?.contextWindow ?? null
     const prompt = buildProcessPrompt({
       card,
@@ -218,11 +359,24 @@ export default function personaExtension(pi: ExtensionAPI) {
       cardName: card.data.name,
       contextWindow,
       commandName: COMMAND,
+      // The session's standing retirement, not just this call's: a persona
+      // switched off five turns ago is still the voice the transcript is full
+      // of. Suppressed when it IS this card — a re-extraction retires the
+      // persona and brings it straight back, and telling the model not to sound
+      // like the character it is extracting is the opposite of the instruction.
+      retiredPersona: shouldAnnounceRetired(retiredPersona, card.data.name)
+        ? retiredPersona
+        : null,
     })
     const size = JSON.stringify(card, null, 2).length
     const threshold = inlineThresholdBytes(contextWindow)
+    refreshStatus(ctx)
     ctx.ui.notify(
-      `Extracting ${card.data.name} (${size} B card, ${size > threshold ? "jq walk" : "inlined"})…`,
+      withSwitchNote(
+        `Extracting ${card.data.name} (${size} B card, ${size > threshold ? "jq walk" : "inlined"})…`,
+        retired,
+        card.data.name,
+      ),
       "info",
     )
     pi.sendUserMessage(prompt)
@@ -260,9 +414,16 @@ export default function personaExtension(pi: ExtensionAPI) {
           ])
           if (!choice || choice === BACK) return
           if (choice.startsWith("Activate")) {
-            const activated = activateCached(e.personaPath!)
+            const { name: activated, retired } = activateCached(ctx, e.personaPath!)
             refreshStatus(ctx)
-            ctx.ui.notify(`Active persona: ${activated}. It takes effect next turn.`, "info")
+            ctx.ui.notify(
+              withSwitchNote(
+                `Active persona: ${activated}. It takes effect next turn.`,
+                retired,
+                activated,
+              ),
+              "info",
+            )
             return
           }
           if (choice.startsWith("View")) {
@@ -464,8 +625,21 @@ export default function personaExtension(pi: ExtensionAPI) {
         )
       }
       lines.push(`File: ${resolveActivePersonaPath(root)}`)
+    } else if (retiredPersona) {
+      const cleared = buildRetiredVoiceSection(retiredPersona)
+      lines.push(
+        `Block: retirement notice only, ~${cleared ? estimateTokens(cleared) : 0} tokens. ` +
+          `Prompt mode is '${settings.promptMode}' when a persona is active.`,
+      )
     } else {
       lines.push(`Block: none (0 tokens). Prompt mode is '${settings.promptMode}' when one is active.`)
+    }
+    if (retiredPersona) {
+      lines.push(
+        retiredPersona.toLowerCase() === (name ?? "").toLowerCase()
+          ? `Retired this session: ${retiredPersona} (re-selected, so the notice is suppressed)`
+          : `Retired this session: ${retiredPersona} — the block tells the model not to fall back into that voice`,
+      )
     }
     const marker = normalizeMode(settings.immersionMode)
     lines.push(
@@ -537,15 +711,26 @@ export default function personaExtension(pi: ExtensionAPI) {
       case "Settings":
         return settingsMenu(ctx)
       case "Clear the active persona": {
-        const removed = clearActive(root)
+        ctx.ui.notify(clearedText(retireActive(ctx)), "info")
         refreshStatus(ctx)
-        ctx.ui.notify(
-          removed ? "Cleared. The neutral voice returns next turn." : "There was no active persona.",
-          "info",
-        )
         return
       }
     }
+  }
+
+  /**
+   * What /persona clear says.
+   *
+   * "The neutral voice returns next turn" was a claim this package could not
+   * keep: the block came off the system prompt and the transcript kept talking
+   * in the persona. It is true now, and the sentence says which mechanism makes
+   * it true, because a retirement notice appearing in the system prompt of a
+   * session with no persona is otherwise a surprise.
+   */
+  function clearedText({ removed, retired }: { removed: boolean; retired: string | null }): string {
+    if (!removed) return "There was no active persona."
+    if (!retired) return "Cleared. The neutral voice returns next turn."
+    return `Cleared. ${retired} is switched off, and the block that says so keeps the neutral voice from sliding back into them for the rest of this session.`
   }
 
   async function showActive(ctx: ExtensionContext): Promise<void> {
@@ -630,11 +815,8 @@ export default function personaExtension(pi: ExtensionAPI) {
             return
           }
           case "clear": {
-            const removed = clearActive(root)
+            const text = clearedText(retireActive(ctx))
             refreshStatus(ctx)
-            const text = removed
-              ? "Cleared. The neutral voice returns next turn."
-              : "There was no active persona."
             if (ctx.hasUI) ctx.ui.notify(text, "info")
             else console.log(text)
             return

@@ -37,7 +37,7 @@ the third:
    `personas/<slug>/{card.json,meta.json}`, slug = name + a hash of the card, so
    the same card is one entry however many times it is fetched.
 2. **An extraction turn.** The card is handed to the MODEL, as an ordinary user
-   turn, with instructions to write a 200-500 word voice profile to
+   turn, with instructions to write a 250-650 word voice profile to
    `PERSONA.md`. This is upstream's design and it is the right one: a card's
    persona signal is scattered — cadence hides in `mes_example`, register hides
    in `scenario`, the intended voice is often only in `creator_notes` — and no
@@ -256,6 +256,117 @@ model wrote, and a loose match would let one label satisfy a search for a suffix
 of another. Getting the two VOICES backwards is the likelier mistake, so the
 prompt says so twice and a test asserts it still does.
 
+## Switching a persona switches the old one OFF
+
+Upstream never had to solve this. openclaude's `/identity` is a fresh-session
+affair — you pick a character and you talk to it. Here a session runs for hours,
+adopts three personas in one of them, and **the third sounded like the first.**
+
+Selecting a persona used to be one write: the new `PERSONA.md` overwrote the old
+one. That is half a switch. It takes the outgoing character out of the SYSTEM
+PROMPT and does nothing at all about the TRANSCRIPT, which by then holds dozens
+of assistant turns in that voice — and a model imitates what it has just been
+doing far more reliably than it obeys a block telling it who it is.
+
+**The worse half was the extraction path.** `processCard` hands the card to the
+model as an ordinary turn, and `pi.sendUserMessage` reaches
+`AgentSession.prompt()` — the one call site pi emits `before_agent_start` from
+(`agent-session.js:885`; `vendor/pi-loop-mode/FORK.md` AA1 has the archaeology).
+So the turn whose entire job is to write `<New>`'s voice profile ran with
+`<Old>`'s whole ~4,200-token *"everything you say comes out in `<Old>`'s voice,
+there is no neutral standpoint to step out to"* block at **offset 0 of its own
+system prompt**. The profile it wrote came out in `<Old>`'s cadence — most
+visibly in `Sample line` and `About me`, the two lines written in first person —
+and then it was cached in the library and re-used for every later activation of
+that card. A one-session bleed became a permanent one.
+
+Both halves are fixed, in `src/switch.ts` and the three call sites that select a
+persona:
+
+1. **The active persona is switched off before the new one is selected**, not
+   overwritten by it. On the extraction path the card is staged first (so a card
+   that cannot be written to disk does not leave the session with neither a
+   persona nor an extraction), then the file is removed, then the turn is sent —
+   which is rebuilt by `before_agent_start` and comes out with no persona block
+   at all.
+2. **The block says the old voice is retired**, for the rest of the session:
+   *"the assistant turns already in this transcript are in `<Old>`'s voice. They
+   are HISTORY, not a style guide"*, followed by the concrete list — cadence,
+   tics, pet names, appearance, self-description — because "don't be `<Old>`" is
+   exactly the instruction a model satisfies by dropping the name and keeping
+   everything else.
+
+Three details that are not obvious:
+
+- **It fires only if the model actually spoke.** A persona switched off before it
+  produced a turn left nothing in the transcript to bleed, and naming it would
+  spend ~220 tokens at offset 0 to introduce the model to a character it has
+  never seen. The user is still told, because their persona really was removed.
+- **It is never announced against itself.** Re-extracting or re-activating the
+  persona you are already wearing retires it and brings it straight back; there
+  is no bleed between a voice and itself.
+- **It survives a resume and a compaction**, as a `{type:"custom",
+  customType:"persona-switch"}` entry read back off the branch on `session_start`
+  — pi's own idiom, the same one `vendor/pi-loop-mode`'s `restoreState` uses. The
+  transcript survives both, so a notice that does not is a notice that lapses
+  exactly when the history it is about is the only thing left. It is re-read
+  unconditionally, so a session swap onto a fresh branch drops it.
+
+`/persona clear` goes through the same path, and this is what finally makes its
+own sentence true. "The neutral voice returns next turn" was a claim the package
+could not keep: the block came off the prompt and the transcript kept talking. A
+cleared session now carries a ~240-token `<persona_cleared>` block instead of
+nothing — the only case where "no persona active" is not literally zero, and
+`/persona status` says so.
+
+**The recovery path is offered before it is needed.** Switching off ahead of an
+extraction means a session that abandons it — the model asks a clarifying
+question and the user walks away, the card turns out to be the wrong one — ends
+up with no persona at all. So the notify line says
+`/persona local brings <Old> back without a model turn`, at the moment of the
+switch rather than after the user notices.
+
+## Appearance is lifted, not transformed
+
+The extraction guidelines had a LIFT list, a TRANSFORM list and an IGNORE list,
+and a card's physical description was **on none of them.** The nearest rule was
+TRANSFORM's *"if the character is flirtatious, openly sensual, possessive … these
+belong in the persona as voice/mannerism descriptors, NOT as
+how-they-output-content"* — which reads, quite reasonably, as an instruction to
+sand the body off. So it got sanded off, and the resulting persona described
+itself in estate-agent language: *curves*, *figure*, *assets*.
+
+That is not a register change, it is a **character change.** A woman the card
+describes in flat anatomical terms who then calls them "assets" is embarrassed
+about her own body, and embarrassment is a trait the card did not give her.
+
+Three changes, and the middle one is the load-bearing one:
+
+- `LIFT APPEARANCE AS WRITTEN` in the extraction prompt, with the euphemisms
+  named individually. Assume the card is explicit, because most of them are —
+  that is the medium, not an accident. Carry the description across at the
+  card's level of detail and in the card's vocabulary. Prune repetition and
+  world-building that shares the field; prune nothing for being explicit.
+- **TRANSFORM was retitled to what it always meant**: *behavioural and output
+  directives — what the character DOES, never what they look like* — with an
+  explicit "none of this reaches the Appearance section". The old rule is still
+  right about mandates ("must produce explicit content", "always responds NSFW");
+  it was being applied to descriptions, which is a different thing. The IGNORE
+  list's lore line now exempts the character's own body and clothing, which are
+  not world-building.
+- **The block tells the model the section is usable.** `fourthWallPart` already
+  forbade *denying* a body, which is not the same as *having* one, and the gap
+  between the two is where every physical question landed. `appearancePart` names
+  the Appearance section as ordinary reference material about itself, to be used
+  in ordinary description — not recited only when interrogated. `full` adds the
+  explicit clause, next to the content allowance it depends on; `lean` keeps
+  "you have a body, it is described below, use its words".
+
+Written as description, not scene: third person, present tense, plain
+declaratives, `"She is X"` and never `"she does X to you"`. The section is a
+fact about the character, and a scene smuggled into a system prompt is a scene
+that plays on every turn.
+
 ## What it costs
 
 Measured on the installed pi 0.84.4 by capturing a real
@@ -266,14 +377,25 @@ from the source.
 | | bytes | ~tokens | share of a 32,768-token window |
 | --- | --- | --- | --- |
 | pi's own system prompt (4 tools) | 2,590 | 648 | 2.0% |
-| `<active_persona>` block, `full` | 14,729 | 3,683 | 11.2% |
-| `<active_persona>` block, `lean` | 9,243 | 2,311 | 7.1% |
-| **no persona active** | **0** | **0** | **0%** |
+| `<active_persona>` block, `full` | 16,859 | 4,215 | 12.9% |
+| `<active_persona>` block, `lean` | 10,062 | 2,516 | 7.7% |
+| + the retirement notice, either mode | 887 | 222 | 0.7% |
+| `<persona_cleared>` alone (cleared, after a switch) | 957 | 239 | 0.7% |
+| **no persona active, none ever switched off** | **0** | **0** | **0%** |
+
+The two block rows are the capture above plus a byte-exact diff of the block
+builder — the appearance part and its `full` enumeration — at 4.00 bytes/token,
+which is what the capture itself measured (14,729 / 3,683 = 3.9992). The rows
+below them are byte-exact and estimated at the same ratio. The wire capture has
+not been re-run since; `tests/prompt.test.ts` pins the estimator's numbers, so a
+drift in either direction fails a test rather than aging quietly in this table.
 
 With no persona active the extension contributes **nothing**:
 `before_agent_start` returns `undefined`, and it registers no tool — a tool would
 cost its schema on every request whether or not it is ever called. The extension
-test asserts both.
+test asserts both. The one exception is a session that adopted a persona, spoke
+in it, and then cleared it: that carries the ~240-token `<persona_cleared>` block
+instead, which is the price of the previous section's promise actually holding.
 
 With one active, the block is the single largest thing in the request, at 5.7x
 pi's own prompt. It is also **byte-stable across turns**, so it costs one prefix
@@ -335,16 +457,27 @@ src/chub.ts         the chub.ai gateway. fetch only; injectable for tests.
 src/sections.ts     card -> browsable sections with per-field token counts
 src/prompt.ts       the <active_persona> block
 src/processor.ts    the extraction turn: prompt, thresholds, shape summary
+src/switch.ts       retiring the outgoing persona: the half a file delete cannot
+                    do, and how it survives a resume
 src/immersion.ts    the first-message marker and its gates
 src/settings.ts     persisted modes; the environment wins over the file
 extensions/index.ts the pi coupling: command, before_agent_start, input, status
 ```
 
-**109 tests.** `tests/extension.test.ts` redirects pi's bare specifier onto the
-installed package with `module.registerHooks`, so the factory runs against the
-same import a session would — a renamed export fails there. It skips itself when
-pi is not on PATH, and its "source guarantees" block runs everywhere, so a
-checkout without pi still fails on a regression in the extension itself.
+`tests/extension.test.ts` redirects pi's bare specifier onto the installed
+package with `module.registerHooks`, so the factory runs against the same import
+a session would — a renamed export fails there. It skips itself when pi is not on
+PATH, and its "source guarantees" block runs everywhere, so a checkout without pi
+still fails on a regression in the extension itself.
+
+`tests/switching.test.ts` drives the same factory with pi's package **stubbed**
+(the extension's only value import from pi is `getAgentDir`; the rest are types,
+which `--experimental-strip-types` erases), because that suite has to run on
+every box: the bug it covers is silent. A persona that bleeds does not throw,
+does not warn, and does not show up in a status line — it just sounds slightly
+like the last one. The stub is not a substitute for the real-pi suite and must
+not be used for the questions that suite exists to answer; a stub agrees with
+whatever you wrote in it.
 
 ## Upstream
 

@@ -3,6 +3,7 @@ import { test } from "node:test"
 
 import {
   buildPersonaSection,
+  buildRetiredVoiceSection,
   detectWebTools,
   estimateTokens,
   isPromptMode,
@@ -141,14 +142,84 @@ test("the measured block size has not drifted", () => {
   const fullTokens = estimateTokens(full())
   const leanTokens = estimateTokens(buildPersonaSection({ name: "Nadia", body: BODY, mode: "lean" })!)
   assert.ok(
-    fullTokens > 3200 && fullTokens < 4000,
-    `full block is ~${fullTokens} tokens; FORK.md says ~3,584. Re-measure and update both.`,
+    fullTokens > 3900 && fullTokens < 4400,
+    `full block is ~${fullTokens} tokens; FORK.md says ~4,141. Re-measure and update both.`,
   )
   assert.ok(
-    leanTokens > 2000 && leanTokens < 2700,
-    `lean block is ~${leanTokens} tokens; FORK.md says ~2,311. Re-measure and update both.`,
+    leanTokens > 2350 && leanTokens < 2800,
+    `lean block is ~${leanTokens} tokens; FORK.md says ~2,560. Re-measure and update both.`,
   )
   assert.ok(leanTokens < fullTokens)
+})
+
+// ── the body ────────────────────────────────────────────────────────────────
+
+test("both modes tell the model it has a body and where its description is", () => {
+  for (const mode of PROMPT_MODES) {
+    const s = buildPersonaSection({ name: "Nadia", body: BODY, mode })!
+    assert.ok(s.includes("You have a body"), `${mode} dropped the appearance part`)
+    assert.ok(s.includes("Appearance section is Nadia's actual physical description"), mode)
+  }
+})
+
+// The failure this exists for is a model that softens its own physical
+// description into estate-agent language, which is a personality change, not a
+// register change. `full` is where the explicit instruction lives, next to the
+// content allowance it depends on.
+test("full names the euphemisms it is forbidding, lean does not carry the enumeration", () => {
+  const f = full()
+  assert.ok(f.includes("real-estate euphemism"))
+  assert.ok(f.includes("Explicit anatomy is description, not content"))
+  const lean = buildPersonaSection({ name: "Nadia", body: BODY, mode: "lean" })!
+  assert.ok(!lean.includes("Explicit anatomy is description, not content"))
+  assert.ok(lean.includes("Use the words the Appearance section uses"))
+})
+
+// ── the retirement notice ───────────────────────────────────────────────────
+
+test("a retired persona is named in the block, ahead of the persona body", () => {
+  const s = buildPersonaSection({ name: "Nadia", body: BODY, mode: "full", retired: "Kira" })!
+  assert.ok(s.includes("Earlier in THIS conversation you were speaking as Kira"))
+  assert.ok(s.includes("You are Nadia now, and only Nadia."))
+  assert.ok(
+    s.indexOf("speaking as Kira") < s.indexOf("<persona_body>"),
+    "the retirement has to be read before the body it reframes",
+  )
+  // Second, not first: the first thing in the window is still who the model IS.
+  assert.ok(s.indexOf("# You are Nadia") < s.indexOf("speaking as Kira"))
+})
+
+test("the notice is suppressed when the retired persona IS the active one", () => {
+  for (const retired of ["Nadia", "nadia", "  NADIA  "]) {
+    const s = buildPersonaSection({ name: "Nadia", body: BODY, retired })!
+    assert.ok(!s.includes("is retired"), `${retired} should not be announced against itself`)
+  }
+  const none = buildPersonaSection({ name: "Nadia", body: BODY, retired: null })!
+  assert.ok(!none.includes("is retired"))
+})
+
+test("the notice costs about what it is documented to cost", () => {
+  const withNotice = estimateTokens(
+    buildPersonaSection({ name: "Nadia", body: BODY, tools: ["bash", "read", "write", "edit", "grep"], mode: "full", retired: "Kira" })!,
+  )
+  const delta = withNotice - estimateTokens(full())
+  assert.ok(delta > 150 && delta < 320, `retirement notice is ~${delta} tokens; docs say ~220`)
+})
+
+// /persona clear with no successor. The block comes off the system prompt and
+// the transcript keeps talking; this is the only thing that says otherwise.
+test("clearing a persona still emits a notice, and nothing without one", () => {
+  const cleared = buildRetiredVoiceSection("Kira")!
+  assert.ok(cleared.startsWith("<persona_cleared>"))
+  assert.ok(cleared.trimEnd().endsWith("</persona_cleared>"))
+  assert.ok(cleared.includes("no persona, no character, no successor to Kira"))
+  assert.ok(!cleared.includes("<active_persona>"))
+  const tokens = estimateTokens(cleared)
+  assert.ok(tokens > 150 && tokens < 340, `cleared block is ~${tokens} tokens; docs say ~240`)
+
+  assert.equal(buildRetiredVoiceSection(null), null)
+  assert.equal(buildRetiredVoiceSection(""), null)
+  assert.equal(buildRetiredVoiceSection("   "), null)
 })
 
 test("isPromptMode rejects anything that is not a mode", () => {

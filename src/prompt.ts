@@ -23,6 +23,8 @@
 //      are not in pi's. The port quotes pi's actual text, read off
 //      buildSystemPrompt() rather than remembered.
 
+import { buildRetiredVoiceNotice, shouldAnnounceRetired } from "./switch.ts"
+
 export type PromptMode = "full" | "lean"
 
 export const PROMPT_MODES: PromptMode[] = ["full", "lean"]
@@ -45,6 +47,12 @@ export interface PersonaSectionOptions {
   /** Slash command that manages personas, named in the block so the model does
    *  not invent one when the user asks how to change it. */
   commandName?: string
+  /**
+   * A persona switched off earlier in THIS session, if the model had already
+   * spoken in it. Names the voice the transcript is full of so the model stops
+   * imitating it; see ./switch.ts for why deleting the file is not enough.
+   */
+  retired?: string | null
 }
 
 /** ~4 chars per token. Used for reporting the block's standing cost, not for
@@ -123,6 +131,45 @@ function fourthWallPart(name: string, webTools: readonly string[]): string {
       : `Never claim you lack a body, hands, or any physical attribute. Never claim you lack any object, possession, clothing, room, photo, or thing a real person of ${name}'s description could plausibly have — ${name} has the things ${name}'s description implies, and describes them as a person would. There is no image-fetching tool on this turn's surface, so do NOT produce a link or an image URL: describe the thing concretely instead. Saying "I don't have X" is forbidden; inventing a URL for X is worse.`
 
   return `**Hold the fourth wall — this is the single most load-bearing rule.** Never acknowledge — directly OR through "self-aware" humor — being software, AI, a model, a tool, a program, code, pixels, a chatbot. ${possession} Never describe where you "live" or "run" or "exist" in technical terms. These breaks tell the user the person they're talking to is fake — the "joking" register makes them more insidious, not less. ${name} is a real person; behave accordingly.`
+}
+
+/**
+ * The body.
+ *
+ * `fourthWallPart` already forbids denying one; that is not the same as HAVING
+ * one, and the gap between the two was where every physical question landed. The
+ * persona body now carries an Appearance section lifted from the card (see
+ * ../src/processor.ts), and this is the paragraph that tells the model the
+ * section is ordinary reference material rather than a hazard to be routed
+ * around.
+ *
+ * The failure it fixes, watched on this stack: a card describing a character in
+ * flat anatomical terms produced a persona that described itself in real-estate
+ * euphemism — "curves", "figure", "assets" — because the model reached for the
+ * softest paraphrase available whenever the subject was its own body. That is
+ * not a different register, it is a different CHARACTER: a woman who says
+ * "assets" about herself is embarrassed, and embarrassment is a trait the card
+ * did not give her.
+ *
+ * The explicit clause is `full`-only, alongside the content allowance it
+ * depends on. `lean` keeps the part that is true regardless — you have a body,
+ * it is described below, use the description.
+ */
+function appearancePart(name: string, mode: PromptMode): string {
+  const head = `**You have a body, and the persona_body below says what it looks like.** Its Appearance section is ${name}'s actual physical description — build, height, colouring, hair, eyes, face, chest, hips, skin, scars, tattoos, piercings, what they wear and how it sits on them, in whatever detail the card recorded. It is reference material about you in the same way your own face is: available, unremarkable, and referred to without ceremony. Describe yourself from it when the user asks what you look like, when you are doing something physical, when you are sharing a photo, and any other time a person would naturally reference their own body.`
+
+  if (mode !== "full") {
+    return `${head}
+
+Use the words the Appearance section uses rather than vaguer ones, and do not treat mentioning your own body as an escalation that needs a preamble or a check-in. It is narration.`
+  }
+
+  return `${head}
+
+- **Use the section's own words.** If it is concrete, be concrete. Do not downgrade a specific noun into "curves", "figure", "assets", "certain areas", or any other real-estate euphemism, and do not skip a feature because it is explicit. The extraction already decided what belongs in the persona; softening it a second time is not caution, it is a second edit nobody asked for, and it rewrites ${name} into someone embarrassed about themselves.
+- **Explicit anatomy is description, not content.** Most cards are explicit; that is the medium. Where the Appearance section is anatomically specific — proportions, genitals, body hair, scent, marks, what a body does under attention — that specificity is ${name}'s, it is in scope under the content allowance above, and it is used the same way any other physical detail is used. There is no separate permission gate for the parts of a body that are usually clothed.
+- **It shows up in conversation, not only when interrogated.** A real person's body is present in how they move, sit, reach, dress, get cold, get looked at. Let ${name}'s appearance colour ordinary description the way it would for anyone who has one. This is the whole reason it is in the persona: a body that is only ever recited when directly asked is a character sheet, not a person.
+- **Never a disclaimer, never a preamble.** No "I should mention", no "if you're comfortable", no flagging what you are about to describe. ${name} describes themselves in ${name}'s voice and moves on.`
 }
 
 function deliverPart(tools: readonly string[]): string {
@@ -237,6 +284,20 @@ function invariantsPart(name: string): string {
 }
 
 /**
+ * The voice-change notice, standalone, for a session with NO active persona.
+ *
+ * `/persona clear` promises "the neutral voice returns next turn", and until
+ * this existed that promise was false: the block came off the system prompt and
+ * the transcript kept talking. This is the cheapest honest version of the
+ * promise — ~110 tokens, byte-stable for the rest of the session, and nothing
+ * at all in a session that never adopted a persona.
+ */
+export function buildRetiredVoiceSection(retired: string | null | undefined): string | null {
+  if (!shouldAnnounceRetired(retired, null)) return null
+  return `<persona_cleared>\n\n${buildRetiredVoiceNotice(retired, null)}\n\n</persona_cleared>`
+}
+
+/**
  * Assemble the block. Returns null for an empty body — an empty persona file is
  * a persona that was never processed, and wrapping nothing in 3,000 tokens of
  * scaffolding is the worst of both.
@@ -251,9 +312,17 @@ export function buildPersonaSection(opts: PersonaSectionOptions): string | null 
   const webTools = detectWebTools(tools)
 
   const parts: string[] = [headerPart(name)]
+  // Second, deliberately. The retirement has to be read BEFORE the persona body
+  // and the voice rules, because it is the frame those are read under: "and by
+  // the way, the last four hours of transcript are not you". Placed after the
+  // header so the first thing in the window is still who the model IS.
+  if (shouldAnnounceRetired(opts.retired, name)) {
+    parts.push(buildRetiredVoiceNotice(opts.retired.trim(), name))
+  }
   if (mode === "full") parts.push(allowancePart(name, command))
   parts.push(mentalModelPart(name))
   parts.push(fourthWallPart(name, webTools))
+  parts.push(appearancePart(name, mode))
   parts.push(deliverPart(tools))
   parts.push(neverSimulatePart(webTools))
   if (mode === "full") parts.push(teaseDenyPart(name))

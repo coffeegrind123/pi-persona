@@ -10,7 +10,7 @@ A character persona for pi's voice, over engineering that does not change.
 pi install git:github.com/coffeegrind123/pi-persona
 ```
 
-Pin a tag on anything you care about — the persona block is ~3,700 tokens of
+Pin a tag on anything you care about — the persona block is ~4,200 tokens of
 every request, and it should not change because somebody pushed to `main`:
 
 ```bash
@@ -55,15 +55,41 @@ rather than a caveat on it. A "lazy" character still reads every file.
 
 1. You pick a chara_card_v2 card — from chub.ai, or a `card.json` you dropped in
    `~/.pi/agent/personas/`.
-2. The card is staged, and the **model** is handed a turn that reads it and
-   writes a 200-500 word voice profile: cadence, vocabulary tier, verbal tics,
-   mannerisms, emotional defaults, one sample line. Card operating directives —
-   jailbreaks, output-shape mandates, in-character refusals — are dropped on the
-   way through.
-3. That profile lands at `~/.pi/agent/PERSONA.md` (active) and in the library
+2. Any persona currently active is **switched off first** — see below.
+3. The card is staged, and the **model** is handed a turn that reads it and
+   writes a 250-650 word voice profile: cadence, vocabulary tier, verbal tics,
+   mannerisms, appearance, emotional defaults, one sample line. Card operating
+   directives — jailbreaks, output-shape mandates, in-character refusals — are
+   dropped on the way through. The physical description is not: it is lifted at
+   the card's own level of detail and in the card's own words, because it is what
+   the character reads back when it describes itself.
+4. That profile lands at `~/.pi/agent/PERSONA.md` (active) and in the library
    entry (cached). It takes effect on the next turn.
-4. Re-selecting a card you have already extracted activates the cached profile
+5. Re-selecting a card you have already extracted activates the cached profile
    with no model turn at all.
+
+## Switching
+
+Selecting a persona switches the current one **off** before the new one arrives,
+and tells the model so.
+
+Overwriting `PERSONA.md` is only half a switch: it changes the system prompt and
+leaves a transcript full of assistant turns in the old voice, which a model
+imitates more reliably than it obeys a block telling it who it is. So the block
+also carries, for the rest of the session, *"earlier in THIS conversation you
+were speaking as `<Old>` — those turns are history, not a style guide"*, with the
+list of what does not carry over.
+
+It matters most on the extraction path. That turn is an ordinary model turn, so
+it used to run with the outgoing persona's whole block at the top of its own
+system prompt — the old character wrote the new character's voice profile, and
+the result was cached in the library and re-used forever. It now runs with no
+persona at all.
+
+If you abandon an extraction half-way you are left with no persona; the
+notification says how to bring the old one back, which costs no model turn.
+`/persona clear` uses the same path, which is what makes *"the neutral voice
+returns next turn"* actually true.
 
 ## Where things live
 
@@ -82,9 +108,11 @@ copied from openclaude is read as-is.
 ## Cost
 
 Nothing when no persona is active — the extension registers no tool and adds no
-prompt. With one active it prepends ~3,683 tokens (`full`) or ~2,311 (`lean`) to
-every request, byte-stable across turns. `/persona status` prints the live
-number. `FORK.md` has the wire measurements and what `lean` gives up.
+prompt. With one active it prepends ~4,215 tokens (`full`) or ~2,516 (`lean`) to
+every request, byte-stable across turns; a session that has switched personas
+carries ~220 more for the retirement notice, and a session that has *cleared* one
+carries ~240 for that notice alone. `/persona status` prints the live number.
+`FORK.md` has the wire measurements and what `lean` gives up.
 
 ## Configuration
 
@@ -105,7 +133,9 @@ npm run lint && npm test
 
 The extension suite drives the real factory against the installed pi, so a
 renamed export fails there rather than at a user's next launch; it skips itself
-when pi is not on PATH, and the source assertions run anyway.
+when pi is not on PATH, and the source assertions run anyway. The switching suite
+drives the same factory with pi stubbed, so it runs everywhere — the bug it
+covers is silent, and a suite that skips is no use against a silent bug.
 
 See `FORK.md` for provenance, the six departures from upstream, and the
 measurements.

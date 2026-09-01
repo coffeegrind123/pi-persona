@@ -35,18 +35,56 @@ export function findPiIndex(): string | null {
   return existsSync(legacy) ? legacy : null
 }
 
-let hooked = false
+/**
+ * A minimal stand-in for pi's package.
+ *
+ * The extension's only VALUE import from pi is `getAgentDir`; everything else it
+ * takes is a type, and `--experimental-strip-types` erases those. So on a box
+ * with no pi installed the extension's own logic is still exercisable, and the
+ * switching suite runs everywhere rather than skipping exactly where the
+ * behaviour is easiest to break.
+ *
+ * This does NOT replace the real-pi suite and must not be used for the
+ * questions that suite exists to answer — a renamed pi export, a handler
+ * signature that changed, an event that no longer fires. A stub agrees with
+ * whatever you wrote in it, which is the entire reason `extension.test.ts`
+ * loads the installed package instead.
+ */
+const STUB_SOURCE = `export function getAgentDir() {
+  return process.env.PI_CODING_AGENT_DIR ?? "/tmp/pi-persona-no-agent-dir"
+}
+`
+const STUB_URL = `data:text/javascript,${encodeURIComponent(STUB_SOURCE)}`
 
-export function hookPiResolution(piIndex: string): void {
+let hooked = false
+let target: string | null = null
+
+function ensureHook(): void {
   if (hooked) return
   hooked = true
-  const target = pathToFileURL(piIndex).href
   registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (specifier === PI_SPECIFIER) return { url: target, shortCircuit: true }
+      if (specifier === PI_SPECIFIER && target) return { url: target, shortCircuit: true }
       return nextResolve(specifier, context)
     },
   })
+}
+
+export function hookPiResolution(piIndex: string): void {
+  target = pathToFileURL(piIndex).href
+  ensureHook()
+}
+
+/**
+ * Point pi's specifier at {@link STUB_SOURCE}.
+ *
+ * Per PROCESS: node's test runner gives each FILE its own process, and the two
+ * hooks share one `target`, so a suite that stubs and a suite that does not must
+ * not live in the same file.
+ */
+export function hookStubPi(): void {
+  target = STUB_URL
+  ensureHook()
 }
 
 // ── a recording stand-in for ExtensionAPI ────────────────────────────────────
@@ -65,6 +103,8 @@ export class FakeApi {
   shortcuts: string[] = []
   sentUserMessages: string[] = []
   sentMessages: unknown[] = []
+  /** Every `pi.appendEntry(customType, data)` this session made, in order. */
+  appended: Array<{ customType: string; data: unknown }> = []
 
   on(event: string, handler: (event: unknown, ctx: unknown) => unknown): void {
     const list = this.handlers.get(event) ?? []
@@ -97,7 +137,9 @@ export class FakeApi {
     this.sentMessages.push(message)
   }
 
-  appendEntry(): void {}
+  appendEntry(customType: string, data: unknown): void {
+    this.appended.push({ customType, data })
+  }
   setSessionName(): void {}
   getSessionName(): undefined {
     return undefined
@@ -112,6 +154,8 @@ export class FakeApi {
 
 export interface FakeCtxOptions {
   entries?: unknown[]
+  /** The branch, when it differs from `entries`. Defaults to `entries`. */
+  branch?: unknown[]
   model?: { id?: string; provider?: string; baseUrl?: string; contextWindow?: number }
   contextWindow?: number
   hasUI?: boolean
@@ -131,7 +175,7 @@ export class FakeCtx {
   mode = "tui"
   cwd = process.cwd()
   model: FakeCtxOptions["model"]
-  sessionManager: { getEntries: () => unknown[] }
+  sessionManager: { getEntries: () => unknown[]; getBranch: () => unknown[] }
 
   private opts: FakeCtxOptions
 
@@ -142,7 +186,10 @@ export class FakeCtx {
     this.selects = [...(opts.selects ?? [])]
     this.inputs = [...(opts.inputs ?? [])]
     const entries = opts.entries ?? []
-    this.sessionManager = { getEntries: () => entries }
+    // The extension reads the BRANCH for its custom entries (pi's own idiom) and
+    // falls back to getEntries; both are here so either path is exercised.
+    const branch = opts.branch ?? entries
+    this.sessionManager = { getEntries: () => entries, getBranch: () => branch }
   }
 
   ui = {
@@ -183,6 +230,11 @@ export class FakeCtx {
 
 export function userEntry(text: string): unknown {
   return { type: "message", id: "x", parentId: null, timestamp: "", message: { role: "user", content: text } }
+}
+
+/** A pi custom entry, the shape `pi.appendEntry` writes and the branch replays. */
+export function customEntry(customType: string, data: unknown): unknown {
+  return { type: "custom", id: "c", parentId: null, timestamp: "", customType, data }
 }
 
 export function assistantEntry(text: string): unknown {

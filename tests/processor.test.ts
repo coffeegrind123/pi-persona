@@ -139,3 +139,68 @@ test("the extraction guidelines still separate voice from content mandates", () 
   assert.ok(EXTRACTION_PROMPT.includes("IGNORE (do not surface"))
   assert.ok(EXTRACTION_PROMPT.includes("Operating directives"))
 })
+
+// ── the appearance section ──────────────────────────────────────────────────
+//
+// The persona is USED: the assistant wearing it describes itself, moves,
+// dresses, gets looked at. Before this, appearance was not in the LIFT list at
+// all and the card's physical description was reachable only through the
+// "TRANSFORM sensual content into voice descriptors" rule — which reads, quite
+// reasonably, as an instruction to sand it off.
+
+test("the guidelines ask for appearance, at the card's own level of detail", () => {
+  assert.ok(EXTRACTION_PROMPT.includes("LIFT APPEARANCE AS WRITTEN"))
+  assert.ok(EXTRACTION_PROMPT.includes("Physical appearance, at the card's own level of detail"))
+  // The output format has to carry it too, or the guideline describes a section
+  // the reference structure never asks the model to write.
+  assert.ok(EXTRACTION_PROMPT.includes("  - Appearance — 4-8 bullets"))
+  assert.ok(EXTRACTION_PROMPT.includes("\nAppearance\n- <build, height"))
+})
+
+test("euphemism is named as the failure, not left to be inferred", () => {
+  for (const word of ["Curves", "assets", "ample", "well-endowed"]) {
+    assert.ok(EXTRACTION_PROMPT.includes(word), `${word} is not named as a forbidden euphemism`)
+  }
+  assert.ok(EXTRACTION_PROMPT.includes("Do NOT drop a feature for being explicit"))
+  assert.ok(EXTRACTION_PROMPT.includes("Assume the card is explicit about the body"))
+})
+
+// The old TRANSFORM rule is still right about DIRECTIVES and was being applied
+// to descriptions. Both halves have to be visible or the correction is lost.
+test("transform still covers directives, and explicitly stops at appearance", () => {
+  assert.ok(EXTRACTION_PROMPT.includes("TRANSFORM (don't echo verbatim) BEHAVIOURAL and OUTPUT directives"))
+  assert.ok(EXTRACTION_PROMPT.includes("None of this reaches the Appearance section"))
+  assert.ok(
+    EXTRACTION_PROMPT.includes(
+      "The character's OWN body, face and clothing are not world-building",
+    ),
+    "the IGNORE list's lore line has to exempt the character's own body",
+  )
+})
+
+test("appearance is described, never played out", () => {
+  assert.ok(EXTRACTION_PROMPT.includes("third person, present tense, plain declaratives"))
+  assert.ok(EXTRACTION_PROMPT.includes('"She is X" — never "she does X to you"'))
+})
+
+// ── the outgoing persona ────────────────────────────────────────────────────
+
+test("a retired persona is named at the top of the extraction turn", () => {
+  const p = buildProcessPrompt({ card: card(), ...PATHS, contextWindow: 32768, retiredPersona: "Kira" })
+  assert.ok(p.includes("you were speaking as Kira"))
+  assert.ok(p.includes("It is history, not a source."))
+  // The two first-person lines are where a leftover voice actually survives.
+  assert.ok(p.includes("`Sample line` and `About me`"))
+  // The fingerprint the immersion marker skips on must still be the first thing
+  // in the string, or the extraction turn starts eating the first user turn.
+  assert.ok(p.startsWith(PROCESS_PROMPT_PREFIX))
+  assert.ok(p.indexOf("you were speaking as Kira") < p.indexOf("<staged_card>"))
+})
+
+test("with nothing retired the extraction turn says nothing about it", () => {
+  for (const retiredPersona of [undefined, null, "", "   "]) {
+    const p = buildProcessPrompt({ card: card(), ...PATHS, contextWindow: 32768, retiredPersona })
+    assert.ok(!p.includes("BEFORE YOU START"), `${JSON.stringify(retiredPersona)} produced a notice`)
+    assert.ok(!p.includes("undefined"))
+  }
+})
