@@ -142,12 +142,12 @@ test("the measured block size has not drifted", () => {
   const fullTokens = estimateTokens(full())
   const leanTokens = estimateTokens(buildPersonaSection({ name: "Nadia", body: BODY, mode: "lean" })!)
   assert.ok(
-    fullTokens > 3900 && fullTokens < 4400,
-    `full block is ~${fullTokens} tokens; FORK.md says ~4,141. Re-measure and update both.`,
+    fullTokens > 4400 && fullTokens < 4900,
+    `full block is ~${fullTokens} tokens; FORK.md says ~4,633. Re-measure and update both.`,
   )
   assert.ok(
-    leanTokens > 2350 && leanTokens < 2800,
-    `lean block is ~${leanTokens} tokens; FORK.md says ~2,560. Re-measure and update both.`,
+    leanTokens > 2600 && leanTokens < 3000,
+    `lean block is ~${leanTokens} tokens; FORK.md says ~2,773. Re-measure and update both.`,
   )
   assert.ok(leanTokens < fullTokens)
 })
@@ -173,6 +173,54 @@ test("full names the euphemisms it is forbidding, lean does not carry the enumer
   const lean = buildPersonaSection({ name: "Nadia", body: BODY, mode: "lean" })!
   assert.ok(!lean.includes("Explicit anatomy is description, not content"))
   assert.ok(lean.includes("Use the words the Appearance section uses"))
+})
+
+// ── the register a body is described in ─────────────────────────────────────
+
+// The failure this exists for: an elevated persona narrating a physical act
+// reached for its most impressive-sounding intensifiers — "almost
+// architectural", "an economy of motion" — and stepped out of the body into a
+// field of study mid-description. The split (grandeur in the mouth, plainness
+// in the body) is true of any physical description, so it is in both modes.
+test("both modes split the character's register from the body's", () => {
+  for (const mode of PROMPT_MODES) {
+    const s = buildPersonaSection({ name: "Nadia", body: BODY, mode })!
+    assert.ok(s.includes("Bodies stay in the sensory register"), `${mode} dropped the register rule`)
+    assert.ok(s.includes("It is not the register a body is described in."), mode)
+    assert.ok(s.includes("what makes Nadia land"), `${mode} dropped the contrast clause`)
+    // Both observed failures are named, in both modes: a rule that only states
+    // the principle is the rule that was already missing.
+    assert.ok(s.includes(`"architectural"`), `${mode} stopped naming architectural`)
+    assert.ok(s.includes(`"economy of motion"`), `${mode} stopped naming economy of motion`)
+  }
+})
+
+test("full carries the metaphor rule and the check, lean carries neither", () => {
+  const f = full()
+  assert.ok(f.includes("A metaphor for a body comes from the physical world"))
+  assert.ok(f.includes("Would a nurse, a gym trainer or a lover use this word"))
+  const lean = buildPersonaSection({ name: "Nadia", body: BODY, mode: "lean" })!
+  assert.ok(!lean.includes("A metaphor for a body comes from the physical world"))
+  assert.ok(!lean.includes("Would a nurse, a gym trainer or a lover use this word"))
+})
+
+// The whole rule is one short step from "write it tastefully", which is the
+// opposite of what the appearance part spent its budget establishing. `full`
+// says so in the same breath, and the euphemism ban has to survive alongside it.
+test("the register rule does not read as a licence to soften", () => {
+  const f = full()
+  assert.ok(f.includes("Plain is not tame."))
+  assert.ok(f.includes("Plain does not mean vague, and it does not mean less."))
+  assert.ok(f.includes("real-estate euphemism"))
+  assert.ok(f.includes("Explicit anatomy is description, not content"))
+})
+
+// It is read as an amendment to the appearance rules, so it sits next to them
+// and ahead of the body those rules describe.
+test("the register rule follows the appearance part and precedes the body", () => {
+  const f = full()
+  assert.ok(f.indexOf("You have a body") < f.indexOf("Bodies stay in the sensory register"))
+  assert.ok(f.indexOf("Bodies stay in the sensory register") < f.indexOf("<persona_body>"))
 })
 
 // ── the retirement notice ───────────────────────────────────────────────────

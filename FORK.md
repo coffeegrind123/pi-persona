@@ -367,6 +367,65 @@ declaratives, `"She is X"` and never `"she does X to you"`. The section is a
 fact about the character, and a scene smuggled into a system prompt is a scene
 that plays on every turn.
 
+## The body is described plainly; the character is the one who talks big
+
+Watched on this stack, from a persona whose card gives her a ceremonial,
+self-mythologising voice — she narrates a physical act and produces:
+
+> the size of it makes the motion look almost **architectural** … her fingers
+> dragging down the length again and again with an **economy of motion** that
+> somehow makes it worse
+
+Every other sentence around those two is fine. The defect is the **register**:
+mid-description the narrator leaves the body and characterises what is happening
+with a field of study — architecture, economics — and the reader goes with it,
+from sensation to evaluation, in the middle of the act. The scene does not
+survive that.
+
+It is not a vocabulary problem, and the obvious fixes both cost the character.
+Lowering the persona's vocabulary tier removes the thing the card was for.
+Banning metaphor removes the prose. The actual cause is a **gap in the block**:
+`appearancePart` establishes that the character HAS a body and that its
+description is used without euphemism, and `shapesPart` establishes that
+everything the character says comes out in their voice — and nothing anywhere
+says which of those two governs a body **in motion**. So the model does the
+reasonable thing with what it was given: a physical description needs an
+intensifier, the only elevated register in the block is the character's own, and
+it borrows that. The grandeur ends up in the wrong mouth.
+
+`registerPart` scopes them apart, and sits immediately after the appearance
+rules because it is an amendment to them:
+
+- The voice can be as grand as the card says — **in dialogue**. A body, an act,
+  a sensation is described concretely: seen, heard, felt, smelled, weight, heat,
+  wet, sound, pace.
+- **No field of study characterises a physical act.** The two observed failures
+  are named literally, in both modes, alongside their family — "engineering",
+  "geometry", "composition", "technique", "mechanics". A rule that states only
+  the principle is the rule that was already missing.
+- **A metaphor for a body comes from the physical world** — water, heat, cloth,
+  gravity, weather, hunger — never from a discipline. This is the narrow ban
+  that keeps metaphor available.
+- **The check is a single question**: would a nurse, a gym trainer or a lover
+  use this word for what is happening? A word that lives in one profession's
+  vocabulary and has a plain physical equivalent loses to the plain one.
+- **"Plain is not tame."** The rule is one short step from "write it
+  tastefully", which is precisely what the section above it spent its budget
+  undoing, so `full` closes the step off in the same breath: the concrete word
+  is usually the explicit one, and the euphemism ban still holds. `tests/prompt.test.ts`
+  asserts both rules are present together, because the failure mode of this fix
+  is that it quietly re-introduces the one it sits next to.
+
+The line worth keeping is the last bullet of the block itself: a character
+saying *"you are witnessing a symphony"* is character; that same character's
+body being described as a symphony is the model's ego leaking through the prose.
+The gap between the two is what makes the character land — which turns the
+defect into the mechanism.
+
+`lean` keeps the split and the two named failures (any physical description can
+hit this, roleplay or not) and drops the metaphor rule, the check and the
+plain-is-not-tame clause: ~200 tokens against `full`'s ~490.
+
 ## What it costs
 
 Measured on the installed pi 0.84.4 by capturing a real
@@ -377,14 +436,15 @@ from the source.
 | | bytes | ~tokens | share of a 32,768-token window |
 | --- | --- | --- | --- |
 | pi's own system prompt (4 tools) | 2,590 | 648 | 2.0% |
-| `<active_persona>` block, `full` | 16,859 | 4,215 | 12.9% |
-| `<active_persona>` block, `lean` | 10,062 | 2,516 | 7.7% |
+| `<active_persona>` block, `full` | 18,831 | 4,708 | 14.4% |
+| `<active_persona>` block, `lean` | 10,871 | 2,718 | 8.3% |
 | + the retirement notice, either mode | 887 | 222 | 0.7% |
 | `<persona_cleared>` alone (cleared, after a switch) | 957 | 239 | 0.7% |
 | **no persona active, none ever switched off** | **0** | **0** | **0%** |
 
 The two block rows are the capture above plus a byte-exact diff of the block
-builder — the appearance part and its `full` enumeration — at 4.00 bytes/token,
+builder — the appearance part with its `full` enumeration, and the register part
+with its own — at 4.00 bytes/token,
 which is what the capture itself measured (14,729 / 3,683 = 3.9992). The rows
 below them are byte-exact and estimated at the same ratio. The wire capture has
 not been re-run since; `tests/prompt.test.ts` pins the estimator's numbers, so a
@@ -397,7 +457,7 @@ test asserts both. The one exception is a session that adopted a persona, spoke
 in it, and then cleared it: that carries the ~240-token `<persona_cleared>` block
 instead, which is the price of the previous section's promise actually holding.
 
-With one active, the block is the single largest thing in the request, at 5.7x
+With one active, the block is the single largest thing in the request, at 7.3x
 pi's own prompt. It is also **byte-stable across turns**, so it costs one prefix
 re-prefill at activation and nothing after — which is why it is a standing charge
 worth stating rather than a per-turn one worth optimising.

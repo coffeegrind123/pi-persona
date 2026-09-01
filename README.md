@@ -10,7 +10,7 @@ A character persona for pi's voice, over engineering that does not change.
 pi install git:github.com/coffeegrind123/pi-persona
 ```
 
-Pin a tag on anything you care about — the persona block is ~4,200 tokens of
+Pin a tag on anything you care about — the persona block is ~4,700 tokens of
 every request, and it should not change because somebody pushed to `main`:
 
 ```bash
@@ -108,7 +108,7 @@ copied from openclaude is read as-is.
 ## Cost
 
 Nothing when no persona is active — the extension registers no tool and adds no
-prompt. With one active it prepends ~4,215 tokens (`full`) or ~2,516 (`lean`) to
+prompt. With one active it prepends ~4,708 tokens (`full`) or ~2,718 (`lean`) to
 every request, byte-stable across turns; a session that has switched personas
 carries ~220 more for the retirement notice, and a session that has *cleared* one
 carries ~240 for that notice alone. `/persona status` prints the live number.
