@@ -161,6 +161,8 @@ export interface FakeCtxOptions {
   hasUI?: boolean
   selects?: string[]
   inputs?: string[]
+  /** What `ctx.isIdle()` answers. Defaults to true. */
+  idle?: boolean
 }
 
 export class FakeCtx {
@@ -218,7 +220,7 @@ export class FakeCtx {
   }
 
   isIdle(): boolean {
-    return true
+    return this.opts.idle ?? true
   }
   isProjectTrusted(): boolean {
     return true

@@ -181,6 +181,34 @@ describe("selecting a persona switches the current one off", () => {
     assert.ok(ctx.notifications.at(-1)!.text.includes("Switched Kira off first"))
   })
 
+  // Commands run immediately even while a turn is streaming, and on a busy
+  // session `sendUserMessage()` with no `deliverAs` rejects ("Agent is already
+  // processing") — after the outgoing persona had already been switched off. pi
+  // 1.2.0 widened "busy" to cover a run's start too. Queueing it as a follow-up
+  // is no fix: a follow-up joins the run in flight, whose system prompt was
+  // built with the outgoing persona's block, which is the bleed the test above
+  // exists for. So it refuses, and touches nothing.
+  test("a busy session refuses the extraction and keeps the active persona", async () => {
+    writeFileSync(join(root, PERSONA_FILE), persona("Kira"), "utf8")
+    stageCardForProcessing(root, card("Nadia"))
+
+    const api = new FakeApi()
+    await load(api)
+    const ctx = new FakeCtx({
+      model: FORGE,
+      contextWindow: 32768,
+      entries: SPOKEN,
+      selects: ["  Nadia — card only"],
+      idle: false,
+    })
+    await api.fire("session_start", { reason: "startup" }, ctx)
+    await api.commands.get("persona")!.handler("local", ctx as unknown)
+
+    assert.equal(api.sentUserMessages.length, 0, "no turn may be sent into a busy session")
+    assert.ok(existsSync(join(root, PERSONA_FILE)), "Kira was switched off for an extraction that never ran")
+    assert.match(ctx.notifications.at(-1)!.text, /busy/)
+  })
+
   // Re-extracting the persona you are wearing retires it and brings it straight
   // back. Telling the model not to sound like the character it is extracting is
   // the opposite of the instruction.

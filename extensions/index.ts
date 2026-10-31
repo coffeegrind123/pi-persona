@@ -338,6 +338,15 @@ export default function personaExtension(pi: ExtensionAPI) {
     card: CharaCardV2,
     source: { sourceUrl?: string; projectId?: number; avatarUrl?: string },
   ): void {
+    // Commands run even while a turn streams, and a busy session rejects a
+    // `sendUserMessage()` with no `deliverAs` — after the persona below was
+    // already switched off. A follow-up is no fix: it joins the run in flight,
+    // whose system prompt still carries the outgoing persona. So refuse first,
+    // before anything is staged or retired.
+    if (!ctx.isIdle()) {
+      ctx.ui.notify(`/${COMMAND}: the session is busy. The extraction needs a turn of its own; run it again when this one finishes.`, "warning")
+      return
+    }
     // Staged FIRST: everything here that can throw does so before the active
     // persona is touched, so a card that cannot be written to disk does not
     // leave the session with no persona and no extraction either.
